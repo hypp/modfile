@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::io::Read;
 use std::fmt;
 use std::cmp;
 
@@ -100,11 +101,31 @@ impl Default for PTModule {
 	}
 }
 
+fn read_or_panic(reader: &mut Read, data: &mut [u8]) {
+	match reader.read(data) {
+		Ok(n) if n == data.len() => (),
+		_ => panic!("Failed to read bytes")
+	};
+}
+
 fn write_or_panic(writer: &mut Write, data: &[u8]) {
 	match writer.write_all(&data) {
 		Ok(_) => (),
 		_ => panic!("Failed to write bytes")
 	};
+}
+
+fn read_0_padded_string(reader: &mut Read, len: usize) -> String {
+	let mut data = vec![0u8; len];
+	read_or_panic(reader,&mut data);
+	let mut str = String::new();
+	for byte in data {
+		if byte != 0 {
+			str.push(byte as char);
+		}
+	}
+
+	str
 }
 
 fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
@@ -118,6 +139,19 @@ fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
 	write_or_panic(writer, &data);
 }
 
+fn read_big_endian_u16(reader: &mut Read) -> u16 {
+	let mut data_arr = [0u8; 2];
+	read_or_panic(reader,&mut data_arr);
+
+	let mut data:u16 = 0;
+	
+	for n in data_arr.iter() {
+		data = (data << 8) + *n as u16;
+	}
+	
+	data
+}
+
 fn write_big_endian_u16(writer: &mut Write, val: u16) {
 	let mut data = [0u8; 2];
 	data[0] = (val >> 8) as u8;
@@ -125,6 +159,15 @@ fn write_big_endian_u16(writer: &mut Write, val: u16) {
 	
 	write_or_panic(writer, &data);
 }
+
+fn read_u8(reader: &mut Read) -> u8 {
+	let mut data = [0u8; 1];
+	
+	read_or_panic(reader, &mut data);
+	
+	data[0]
+}
+
 
 fn write_u8(writer: &mut Write, val: u8) {
 	let mut data = [0u8; 1];
@@ -195,4 +238,43 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) {
 	if num_samples != module.sample_data.len() {
 		println!("Warning! Number of samples does not match sample data");
 	}
+}
+
+pub fn read_mod(reader: &mut Read) -> PTModule {
+	let mut module:PTModule = Default::default();
+
+	// First read 20 bytes songname
+	module.name = read_0_padded_string(reader, 20);
+	// Read all sample info
+	// TODO Handle 15 sample files
+	let mut num_samples = 0;
+	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
+		let si = &mut module.sample_info[i];
+		// Sample name
+		si.name = read_0_padded_string(reader, 22);
+		si.length = read_big_endian_u16(reader);
+		if si.length > 0 {
+			num_samples += 1;
+		}
+		// Finetune
+		si.finetune = read_u8(reader);
+		// Volume
+		si.volume = read_u8(reader);
+		// Repeat start
+		si.repeat_start = read_big_endian_u16(reader);
+		// Repeat length
+		si.repeat_length = read_big_endian_u16(reader);
+	}
+	
+	// Songlength
+	module.length = read_u8(reader);
+	// nt_restart
+	module.nt_restart = read_u8(reader);
+	// Song positions
+	read_or_panic(reader,&mut module.positions.data);
+	// M.K.
+	read_or_panic(reader,&mut module.mk);
+	
+
+	module
 }
