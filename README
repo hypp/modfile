@@ -1,5 +1,5 @@
 About
-This is a Rust crate for parsing a "Standard MIDI file format"-file.
+This is a Rust crate for reading and writing Amiga ProTracker MOD-files.
 I wrote this as an experiment trying to learn Rust.
 
 Please feel free to report bugs and contribute in anyway you like.
@@ -11,16 +11,18 @@ Usage
 See the examples dir, but basically it is:
 
 ...
-extern crate midifile;
-use midifile::smf;
+extern crate modfile;
+use modfile::ptmf;
 ...
 let mut reader = BufReader::new(&file);
-let midi_file = smf::read_file(&mut reader);
+let mut module = ptmf::read_mod(&mut reader);
 ...
-
+let mut writer = BufWriter::new(&new_file);
+ptmf::write_mod(&mut writer, &mut module);
+...
 
 And put this in your Cargo.toml:
 ...
-[dependencies.midifile]
-git = "https://github.com/hypp/midifile"
+[dependencies.modfile]
+git = "https://github.com/hypp/modfile"
 ...

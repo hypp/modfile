@@ -4,7 +4,9 @@ use std::fmt;
 use std::cmp;
 
 const DEFAULT_NUMBER_OF_SAMPLES:usize = 31;
-
+const DEFAULT_NUMBER_OF_ROWS_PER_PATTERN:usize = 64;
+const DEFAULT_NUMBER_OF_CHANNELS_PER_ROW:usize = 4;
+const MAGIC_MK:[u8; 4] =['M' as u8, '.' as u8, 'K' as u8, '.' as u8];
 
 #[derive(Debug)]
 pub struct SampleInfo {
@@ -16,8 +18,8 @@ pub struct SampleInfo {
 	pub repeat_length: u16, // Number of words to loop, multiply by 2
 }
 
-impl Default for SampleInfo {
-	fn default() -> SampleInfo {
+impl SampleInfo {
+	pub fn new() -> SampleInfo {
 		SampleInfo{name: String::new(), length:0, finetune:0, volume:0, repeat_start:0, repeat_length:0}
 	}
 }
@@ -29,17 +31,22 @@ pub struct Channel {
 	pub effect: u16 // Really u12
 }
 
+impl Channel {
+	pub fn new() -> Channel {
+		Channel{period: 0, sample_number: 0, effect: 0}
+	}
+}
+
 #[derive(Debug)]
 pub struct Row {
 	pub channels: Vec<Channel>
 }
 
-impl Default for Row {
-	fn default() -> Row {
+impl Row {
+	pub fn new() -> Row {
 		let mut row = Row{channels: Vec::new()};
-		for _ in 0..4 {
-			let c = Channel{period: 0, sample_number: 0, effect: 0};
-			row.channels.push(c);
+		for _ in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+			row.channels.push(Channel::new());
 		}
 		
 		row
@@ -51,13 +58,12 @@ pub struct Pattern {
 	pub rows: Vec<Row>
 }
 
-impl Default for Pattern {
-	fn default() -> Pattern {
+impl Pattern {
+	pub fn new() -> Pattern {
 		let mut p = Pattern{rows: Vec::new()};
 
-		for _ in 0..64 {
-			let row:Row = Default::default();
-			p.rows.push(row);
+		for _ in 0..DEFAULT_NUMBER_OF_ROWS_PER_PATTERN {
+			p.rows.push(Row::new());
 		}
 
 		p
@@ -87,14 +93,14 @@ pub struct PTModule {
 	pub sample_data: Vec<Vec<u8>> // The bytes in the samples -127 - 127
 }
 
-impl Default for PTModule {
-	fn default() -> PTModule {
-		let mut ptmod = PTModule{name: String::new(), sample_info: Vec::new(), length:0, nt_restart: 127, 
-			positions: Positions{data: [0; 128]}, mk: ['M' as u8, '.' as u8, 'K' as u8, '.' as u8], patterns: Vec::new(), sample_data: Vec::new() };
+impl PTModule {
+	pub fn new() -> PTModule {
+		let mut ptmod = PTModule{name: String::new(), sample_info: Vec::new(), length:0, 
+			nt_restart: 127, positions: Positions{data: [0; 128]}, mk: MAGIC_MK, 
+			patterns: Vec::new(), sample_data: Vec::new() };
 			
 		for _ in 0..DEFAULT_NUMBER_OF_SAMPLES {
-			let si: SampleInfo = Default::default();
-			ptmod.sample_info.push(si);
+			ptmod.sample_info.push(SampleInfo::new());
 		}
 		
 		ptmod
@@ -102,10 +108,14 @@ impl Default for PTModule {
 }
 
 fn read_or_panic(reader: &mut Read, data: &mut [u8]) {
-	match reader.read(data) {
-		Ok(n) if n == data.len() => (),
-		_ => panic!("Failed to read bytes")
-	};
+	let mut pos = 0;
+	while pos < data.len() {
+		let slice = &mut data[pos..];
+		match reader.read(slice) {
+			Ok(n) => pos += n,
+			_ => panic!("Failed to read bytes")
+		};
+	}
 }
 
 fn write_or_panic(writer: &mut Write, data: &[u8]) {
@@ -176,6 +186,8 @@ fn write_u8(writer: &mut Write, val: u8) {
 	write_or_panic(writer, &data);
 }
 
+/// Write a 31 sample Amiga ProTracker mod-file
+/// Panics on all errors
 pub fn write_mod(writer: &mut Write, module: &mut PTModule) {
 
 	// First write songname, 20 bytes, pad with 0
@@ -236,26 +248,24 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) {
 	}
 	
 	if num_samples != module.sample_data.len() {
-		println!("Warning! Number of samples does not match sample data");
+		panic!("Warning! Number of samples does not match sample data");
 	}
 }
 
+/// Read a 31 sample Amiga ProTracker mod-file
+/// Panics on all errors
 pub fn read_mod(reader: &mut Read) -> PTModule {
-	let mut module:PTModule = Default::default();
+	let mut module = PTModule::new();
 
 	// First read 20 bytes songname
 	module.name = read_0_padded_string(reader, 20);
 	// Read all sample info
 	// TODO Handle 15 sample files
-	let mut num_samples = 0;
 	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
 		let si = &mut module.sample_info[i];
 		// Sample name
 		si.name = read_0_padded_string(reader, 22);
 		si.length = read_big_endian_u16(reader);
-		if si.length > 0 {
-			num_samples += 1;
-		}
 		// Finetune
 		si.finetune = read_u8(reader);
 		// Volume
@@ -274,7 +284,47 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 	read_or_panic(reader,&mut module.positions.data);
 	// M.K.
 	read_or_panic(reader,&mut module.mk);
+	if module.mk != MAGIC_MK {
+		panic!("Unknown format {:?}", module.mk);
+	}
 	
+	// Read all patterns
+	let mut num_patterns = 0;
+	for n in module.positions.data.iter() {
+		num_patterns = cmp::max(num_patterns,*n);
+	}
+	num_patterns += 1;
+	for _ in 0..num_patterns {
+		let mut pattern = Pattern::new();
+		for mut row in &mut pattern.rows {
+			for channel in &mut row.channels {
+				let mut data  = [0u8;4];
+				read_or_panic(reader,&mut data);
+				channel.sample_number = (data[0] & 0xf0) | ((data[2] & 0xf0) >> 4);
+				channel.period = (((data[0] & 0x0f) as u16) << 8) | (data[1] as u16);
+				channel.effect = (((data[2] & 0x0f) as u16) << 8) | (data[3] as u16);
+			}
+		}
+		module.patterns.push(pattern);
+	}
+	
+	// Read all samples
+	for si in &module.sample_info {
+		if si.length > 0 {
+			let length_in_bytes = si.length * 2;
+			let mut data = vec![0u8; length_in_bytes as usize];
+			read_or_panic(reader,&mut data);
+			module.sample_data.push(data);
+		}
+	}
+	
+	// Now we have read all data. 
+	// Sanity check that the reader is empty
+	let mut data = [0u8; 1];
+	match reader.read(&mut data) {
+		Ok(n) if n == data.len() => panic!("Unread data left in file"),
+		_ => ()
+	};
 
 	module
 }
