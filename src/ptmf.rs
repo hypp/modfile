@@ -2,6 +2,7 @@ use std::io::Write;
 use std::io::Read;
 use std::fmt;
 use std::cmp;
+use std::io;
 
 const DEFAULT_NUMBER_OF_SAMPLES:usize = 31;
 const DEFAULT_NUMBER_OF_ROWS_PER_PATTERN:usize = 64;
@@ -107,15 +108,15 @@ impl PTModule {
 	}
 }
 
-fn read_or_panic(reader: &mut Read, data: &mut [u8]) {
+fn read_all(reader: &mut Read, data: &mut [u8]) -> io::Result<usize> {
 	let mut pos = 0;
 	while pos < data.len() {
 		let slice = &mut data[pos..];
-		match reader.read(slice) {
-			Ok(n) => pos += n,
-			_ => panic!("Failed to read bytes")
-		};
+		let n = try!(reader.read(slice));
+		pos += n;
 	}
+	
+	Ok(pos)
 }
 
 fn write_or_panic(writer: &mut Write, data: &[u8]) {
@@ -127,7 +128,7 @@ fn write_or_panic(writer: &mut Write, data: &[u8]) {
 
 fn read_0_padded_string(reader: &mut Read, len: usize) -> String {
 	let mut data = vec![0u8; len];
-	read_or_panic(reader,&mut data);
+	read_all(reader,&mut data);
 	let mut str = String::new();
 	for byte in data {
 		if byte != 0 {
@@ -151,7 +152,7 @@ fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
 
 fn read_big_endian_u16(reader: &mut Read) -> u16 {
 	let mut data_arr = [0u8; 2];
-	read_or_panic(reader,&mut data_arr);
+	read_all(reader,&mut data_arr);
 
 	let mut data:u16 = 0;
 	
@@ -173,7 +174,7 @@ fn write_big_endian_u16(writer: &mut Write, val: u16) {
 fn read_u8(reader: &mut Read) -> u8 {
 	let mut data = [0u8; 1];
 	
-	read_or_panic(reader, &mut data);
+	read_all(reader, &mut data);
 	
 	data[0]
 }
@@ -281,9 +282,9 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 	// nt_restart
 	module.nt_restart = read_u8(reader);
 	// Song positions
-	read_or_panic(reader,&mut module.positions.data);
+	read_all(reader,&mut module.positions.data);
 	// M.K.
-	read_or_panic(reader,&mut module.mk);
+	read_all(reader,&mut module.mk);
 	if module.mk != MAGIC_MK {
 		panic!("Unknown format {:?}", module.mk);
 	}
@@ -299,7 +300,7 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 		for mut row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
-				read_or_panic(reader,&mut data);
+				read_all(reader,&mut data);
 				channel.sample_number = (data[0] & 0xf0) | ((data[2] & 0xf0) >> 4);
 				channel.period = (((data[0] & 0x0f) as u16) << 8) | (data[1] as u16);
 				channel.effect = (((data[2] & 0x0f) as u16) << 8) | (data[3] as u16);
@@ -313,7 +314,7 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 		if si.length > 0 {
 			let length_in_bytes = si.length * 2;
 			let mut data = vec![0u8; length_in_bytes as usize];
-			read_or_panic(reader,&mut data);
+			read_all(reader,&mut data);
 			module.sample_data.push(data);
 		}
 	}
