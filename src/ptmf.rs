@@ -126,9 +126,9 @@ fn write_or_panic(writer: &mut Write, data: &[u8]) {
 	};
 }
 
-fn read_0_padded_string(reader: &mut Read, len: usize) -> String {
+fn read_0_padded_string(reader: &mut Read, len: usize) -> Result<String, io::Error> {
 	let mut data = vec![0u8; len];
-	read_all(reader,&mut data);
+	try!(read_all(reader,&mut data));
 	let mut str = String::new();
 	for byte in data {
 		if byte != 0 {
@@ -136,7 +136,7 @@ fn read_0_padded_string(reader: &mut Read, len: usize) -> String {
 		}
 	}
 
-	str
+	Ok(str)
 }
 
 fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
@@ -150,9 +150,9 @@ fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
 	write_or_panic(writer, &data);
 }
 
-fn read_big_endian_u16(reader: &mut Read) -> u16 {
+fn read_big_endian_u16(reader: &mut Read) -> Result<u16, io::Error> {
 	let mut data_arr = [0u8; 2];
-	read_all(reader,&mut data_arr);
+	try!(read_all(reader,&mut data_arr));
 
 	let mut data:u16 = 0;
 	
@@ -160,7 +160,7 @@ fn read_big_endian_u16(reader: &mut Read) -> u16 {
 		data = (data << 8) + *n as u16;
 	}
 	
-	data
+	Ok(data)
 }
 
 fn write_big_endian_u16(writer: &mut Write, val: u16) {
@@ -171,12 +171,12 @@ fn write_big_endian_u16(writer: &mut Write, val: u16) {
 	write_or_panic(writer, &data);
 }
 
-fn read_u8(reader: &mut Read) -> u8 {
+fn read_u8(reader: &mut Read) -> Result<u8, io::Error> {
 	let mut data = [0u8; 1];
 	
-	read_all(reader, &mut data);
+	try!(read_all(reader, &mut data));
 	
-	data[0]
+	Ok(data[0])
 }
 
 
@@ -255,36 +255,36 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) {
 
 /// Read a 31 sample Amiga ProTracker mod-file
 /// Panics on all errors
-pub fn read_mod(reader: &mut Read) -> PTModule {
+pub fn read_mod(reader: &mut Read) -> Result<PTModule, io::Error> {
 	let mut module = PTModule::new();
 
 	// First read 20 bytes songname
-	module.name = read_0_padded_string(reader, 20);
+	module.name = try!(read_0_padded_string(reader, 20));
 	// Read all sample info
 	// TODO Handle 15 sample files
 	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
 		let si = &mut module.sample_info[i];
 		// Sample name
-		si.name = read_0_padded_string(reader, 22);
-		si.length = read_big_endian_u16(reader);
+		si.name = try!(read_0_padded_string(reader, 22));
+		si.length = try!(read_big_endian_u16(reader));
 		// Finetune
-		si.finetune = read_u8(reader);
+		si.finetune = try!(read_u8(reader));
 		// Volume
-		si.volume = read_u8(reader);
+		si.volume = try!(read_u8(reader));
 		// Repeat start
-		si.repeat_start = read_big_endian_u16(reader);
+		si.repeat_start = try!(read_big_endian_u16(reader));
 		// Repeat length
-		si.repeat_length = read_big_endian_u16(reader);
+		si.repeat_length = try!(read_big_endian_u16(reader));
 	}
 	
 	// Songlength
-	module.length = read_u8(reader);
+	module.length = try!(read_u8(reader));
 	// nt_restart
-	module.nt_restart = read_u8(reader);
+	module.nt_restart = try!(read_u8(reader));
 	// Song positions
-	read_all(reader,&mut module.positions.data);
+	try!(read_all(reader,&mut module.positions.data));
 	// M.K.
-	read_all(reader,&mut module.mk);
+	try!(read_all(reader,&mut module.mk));
 	if module.mk != MAGIC_MK {
 		panic!("Unknown format {:?}", module.mk);
 	}
@@ -300,7 +300,7 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 		for mut row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
-				read_all(reader,&mut data);
+				try!(read_all(reader,&mut data));
 				channel.sample_number = (data[0] & 0xf0) | ((data[2] & 0xf0) >> 4);
 				channel.period = (((data[0] & 0x0f) as u16) << 8) | (data[1] as u16);
 				channel.effect = (((data[2] & 0x0f) as u16) << 8) | (data[3] as u16);
@@ -314,7 +314,7 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 		if si.length > 0 {
 			let length_in_bytes = si.length * 2;
 			let mut data = vec![0u8; length_in_bytes as usize];
-			read_all(reader,&mut data);
+			try!(read_all(reader,&mut data));
 			module.sample_data.push(data);
 		}
 	}
@@ -327,5 +327,5 @@ pub fn read_mod(reader: &mut Read) -> PTModule {
 		_ => ()
 	};
 
-	module
+	Ok(module)
 }
