@@ -19,7 +19,7 @@ fn main() {
 		};
 		
 		let mut reader = BufReader::new(&file);
-		let mut module = ptmf::read_mod(&mut reader);
+		let mut module = ptmf::read_mod(&mut reader).unwrap();
 
 		println!("Songname: '{}'",module.name);
 		for si in &module.sample_info {
@@ -37,7 +37,7 @@ fn main() {
 		};
 
 		let mut writer = BufWriter::new(&file);
-		ptmf::write_mod(&mut writer, &mut module);
+		ptmf::write_mod(&mut writer, &mut module).unwrap();
 		
 		println!("***** *****")
 	}

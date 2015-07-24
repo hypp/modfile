@@ -15,10 +15,10 @@ extern crate modfile;
 use modfile::ptmf;
 ...
 let mut reader = BufReader::new(&file);
-let mut module = ptmf::read_mod(&mut reader);
+let mut module = ptmf::read_mod(&mut reader).unwrap();
 ...
 let mut writer = BufWriter::new(&new_file);
-ptmf::write_mod(&mut writer, &mut module);
+ptmf::write_mod(&mut writer, &mut module).unwrap();
 ...
 
 And put this in your Cargo.toml:
