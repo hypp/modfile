@@ -10,6 +10,18 @@ const DEFAULT_NUMBER_OF_CHANNELS_PER_ROW:usize = 4;
 const MAGIC_MK:[u8; 4] =['M' as u8, '.' as u8, 'K' as u8, '.' as u8];
 
 #[derive(Debug)]
+pub enum PTMFError {
+	Io(io::Error),
+	Parse(String)
+}
+
+impl From<io::Error> for PTMFError {
+    fn from(err: io::Error) -> PTMFError {
+        PTMFError::Io(err)
+    }
+}
+
+#[derive(Debug)]
 pub struct SampleInfo {
 	pub name: String, // [char; 22],
 	pub length: u16, // In words, so multiply by 2
@@ -119,11 +131,10 @@ fn read_all(reader: &mut Read, data: &mut [u8]) -> io::Result<usize> {
 	Ok(pos)
 }
 
-fn write_or_panic(writer: &mut Write, data: &[u8]) {
-	match writer.write_all(&data) {
-		Ok(_) => (),
-		_ => panic!("Failed to write bytes")
-	};
+fn write_all(writer: &mut Write, data: &[u8]) -> io::Result<()> {
+	let n = try!{writer.write_all(&data)};
+	
+	Ok(n)
 }
 
 fn read_0_padded_string(reader: &mut Read, len: usize) -> Result<String, io::Error> {
@@ -139,7 +150,7 @@ fn read_0_padded_string(reader: &mut Read, len: usize) -> Result<String, io::Err
 	Ok(str)
 }
 
-fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
+fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) -> io::Result<()> {
 	let mut data = vec![0u8; len];
 	let str_buf = str.as_bytes();
 	let m = cmp::min(data.len(),str_buf.len());
@@ -147,7 +158,9 @@ fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) {
 		data[i] = str_buf[i];
 	}
 	
-	write_or_panic(writer, &data);
+	let n = try!(write_all(writer, &data));
+	
+	Ok(n)
 }
 
 fn read_big_endian_u16(reader: &mut Read) -> Result<u16, io::Error> {
@@ -163,12 +176,14 @@ fn read_big_endian_u16(reader: &mut Read) -> Result<u16, io::Error> {
 	Ok(data)
 }
 
-fn write_big_endian_u16(writer: &mut Write, val: u16) {
+fn write_big_endian_u16(writer: &mut Write, val: u16)  -> io::Result<()> {
 	let mut data = [0u8; 2];
 	data[0] = (val >> 8) as u8;
 	data[1] = (val & 0xff) as u8;
 	
-	write_or_panic(writer, &data);
+	let n = try!(write_all(writer, &data));
+	
+	Ok(n)
 }
 
 fn read_u8(reader: &mut Read) -> Result<u8, io::Error> {
@@ -180,50 +195,51 @@ fn read_u8(reader: &mut Read) -> Result<u8, io::Error> {
 }
 
 
-fn write_u8(writer: &mut Write, val: u8) {
+fn write_u8(writer: &mut Write, val: u8)  -> io::Result<()> {
 	let mut data = [0u8; 1];
 	data[0] = val;
 	
-	write_or_panic(writer, &data);
+	let n = try!(write_all(writer, &data));
+	
+	Ok(n)
 }
 
 /// Write a 31 sample Amiga ProTracker mod-file
-/// Panics on all errors
-pub fn write_mod(writer: &mut Write, module: &mut PTModule) {
+pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFError> {
 
 	// First write songname, 20 bytes, pad with 0
-	write_0_padded_string(writer,&module.name,20);
+	try!(write_0_padded_string(writer,&module.name,20));
 	// Then write all 32 samples
 	// TODO Handle the case when the vector has less than 31 samples
 	let mut num_samples = 0;
 	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
 		let ref si = module.sample_info[i];
 		// Sample name
-		write_0_padded_string(writer, &si.name, 22);
+		try!(write_0_padded_string(writer, &si.name, 22));
 		// Sample length
-		write_big_endian_u16(writer, si.length);
+		try!(write_big_endian_u16(writer, si.length));
 		if si.length > 0 {
 			num_samples += 1;
 		}
 		// Finetune
-		write_u8(writer, si.finetune);
+		try!(write_u8(writer, si.finetune));
 		// Volume
-		write_u8(writer, si.volume);
+		try!(write_u8(writer, si.volume));
 		// Repeat start
-		write_big_endian_u16(writer, si.repeat_start);
+		try!(write_big_endian_u16(writer, si.repeat_start));
 		// Repeat length
-		write_big_endian_u16(writer, si.repeat_length);
+		try!(write_big_endian_u16(writer, si.repeat_length));
 	}
 	
 	let num_samples = num_samples;
 	// Songlength
-	write_u8(writer, module.length);
+	try!(write_u8(writer, module.length));
 	// nt_restart
-	write_u8(writer, module.nt_restart);
+	try!(write_u8(writer, module.nt_restart));
 	// Song positions
-	write_or_panic(writer,&module.positions.data);
+	try!(write_all(writer,&module.positions.data));
 	// M.K.
-	write_or_panic(writer,&module.mk);
+	try!(write_all(writer,&module.mk));
 	
 	// All patterns
 	for pattern_it in module.patterns.iter() {
@@ -238,24 +254,25 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) {
 				data[2] = ((channel_it.sample_number & 0x0f) << 4) | ((channel_it.effect & 0xf00) >> 8) as u8;
 				data[3] = (channel_it.effect & 0xff) as u8;
 				
-				write_or_panic(writer,&data);
+				try!(write_all(writer,&data));
 			}
 		}
 	}
 	
 	// And finally all samples
 	for sample_it in module.sample_data.iter() {
-		write_or_panic(writer,sample_it);
+		try!(write_all(writer,sample_it));
 	}
 	
 	if num_samples != module.sample_data.len() {
-		panic!("Warning! Number of samples does not match sample data");
+		return Err(PTMFError::Parse(format!("Warning! Number of samples '{}' does not match sample data '{}'", num_samples, module.sample_data.len())));
 	}
+	
+	Ok(())
 }
 
 /// Read a 31 sample Amiga ProTracker mod-file
-/// Panics on all errors
-pub fn read_mod(reader: &mut Read) -> Result<PTModule, io::Error> {
+pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	let mut module = PTModule::new();
 
 	// First read 20 bytes songname
@@ -286,7 +303,7 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, io::Error> {
 	// M.K.
 	try!(read_all(reader,&mut module.mk));
 	if module.mk != MAGIC_MK {
-		panic!("Unknown format {:?}", module.mk);
+		return Err(PTMFError::Parse(format!("Unknown format {:?}", module.mk)));
 	}
 	
 	// Read all patterns
@@ -323,7 +340,7 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, io::Error> {
 	// Sanity check that the reader is empty
 	let mut data = [0u8; 1];
 	match reader.read(&mut data) {
-		Ok(n) if n == data.len() => panic!("Unread data left in file"),
+		Ok(n) if n == data.len() => return Err(PTMFError::Parse(format!("Unread data left in file"))),
 		_ => ()
 	};
 
