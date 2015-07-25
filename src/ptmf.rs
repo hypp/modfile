@@ -125,6 +125,9 @@ fn read_all(reader: &mut Read, data: &mut [u8]) -> io::Result<usize> {
 	while pos < data.len() {
 		let slice = &mut data[pos..];
 		let n = try!(reader.read(slice));
+		if n == 0 {
+			return Err(io::Error::new(io::ErrorKind::Other, "0 was returned from read"))
+		}
 		pos += n;
 	}
 	
@@ -277,6 +280,7 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 
 	// First read 20 bytes songname
 	module.name = try!(read_0_padded_string(reader, 20));
+
 	// Read all sample info
 	// TODO Handle 15 sample files
 	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
