@@ -8,6 +8,7 @@ const DEFAULT_NUMBER_OF_SAMPLES:usize = 31;
 const DEFAULT_NUMBER_OF_ROWS_PER_PATTERN:usize = 64;
 const DEFAULT_NUMBER_OF_CHANNELS_PER_ROW:usize = 4;
 const MAGIC_MK:[u8; 4] =['M' as u8, '.' as u8, 'K' as u8, '.' as u8];
+const MAGIC_FLT4:[u8; 4] =['F' as u8, 'L' as u8, 'T' as u8, '4' as u8];
 
 #[derive(Debug)]
 pub enum PTMFError {
@@ -306,7 +307,8 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	try!(read_all(reader,&mut module.positions.data));
 	// M.K.
 	try!(read_all(reader,&mut module.mk));
-	if module.mk != MAGIC_MK {
+	if module.mk != MAGIC_MK &&
+		module.mk != MAGIC_FLT4 {
 		return Err(PTMFError::Parse(format!("Unknown format {:?}", module.mk)));
 	}
 	
