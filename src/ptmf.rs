@@ -10,9 +10,12 @@ const DEFAULT_NUMBER_OF_CHANNELS_PER_ROW:usize = 4;
 const MAGIC_MK:[u8; 4] =['M' as u8, '.' as u8, 'K' as u8, '.' as u8];
 const MAGIC_FLT4:[u8; 4] =['F' as u8, 'L' as u8, 'T' as u8, '4' as u8];
 
+/// Custom error enum
 #[derive(Debug)]
 pub enum PTMFError {
+	/// IO errors
 	Io(io::Error),
+	/// Parse errors
 	Parse(String)
 }
 
@@ -22,13 +25,20 @@ impl From<io::Error> for PTMFError {
     }
 }
 
+/// Info about each sample
 #[derive(Debug)]
 pub struct SampleInfo {
+	/// Name of sample, 22 characters
 	pub name: String, // [char; 22],
+	/// Length of sample in words
 	pub length: u16, // In words, so multiply by 2
+	/// Finetune value -7 to +7
 	pub finetune: u8,
+	/// Volume 0 to 64
 	pub volume: u8, // 0-64
+	/// Repeat start in words
 	pub repeat_start: u16, // In words from start of sample data, so multiply by 2
+	/// Repeat length in words
 	pub repeat_length: u16, // Number of words to loop, multiply by 2
 }
 
@@ -38,10 +48,14 @@ impl SampleInfo {
 	}
 }
 
+/// Data for one channel
 #[derive(Debug)]
 pub struct Channel {
+	/// The period value used on Amiga for playback. Represents the frequency.
 	pub period: u16, // Really u12
+	/// Which sample to use when playing. 0 means last used sample.
 	pub sample_number: u8,
+	/// The effect to use.
 	pub effect: u16 // Really u12
 }
 
@@ -51,8 +65,11 @@ impl Channel {
 	}
 }
 
+/// A single row in a Pattern.
+/// Normally there are 4 channels per Row.
 #[derive(Debug)]
 pub struct Row {
+	/// Data for each Channel
 	pub channels: Vec<Channel>
 }
 
@@ -67,8 +84,10 @@ impl Row {
 	}
 }
 
+/// A Pattern with multiple Rows and Channels
 #[derive(Debug)]
 pub struct Pattern {
+	/// Data for each Channel
 	pub rows: Vec<Row>
 }
 
@@ -84,7 +103,9 @@ impl Pattern {
 	}
 }
 
+/// The order in which to play Patterns
 pub struct Positions {
+	/// The order in which to play Patterns
 	pub data: [u8; 128]
 }
 
@@ -94,16 +115,25 @@ impl fmt::Debug for Positions {
     }
 }
 
-
+/// A complete ProTracker module,
+/// including samples, descriptions and patterns
 #[derive(Debug)]
 pub struct PTModule {
+	/// Songname 20 characters
 	pub name: String, // [char; 20],
+	/// Info about each sample. Usually there are 31 samples.
 	pub sample_info: Vec<SampleInfo>, // [SampleInfo; DEFAULT_NUMBER_OF_SAMPLES]
+	/// Length of song, i.e. number of patterns to play
 	pub length: u8, // Length 1-128
+	/// Unknown value. Set it to 127.
 	pub nt_restart: u8, // Set to 127
+	/// The order in which to play patterns
 	pub positions: Positions, // The order in which to play patterns
+	/// Magic bytes, either M.K. or FLT4
 	pub mk: [u8; 4], // Set to M.K.
+	/// The patterns
 	pub patterns: Vec<Pattern>,
+	/// The sample data. 8 bit signed.
 	pub sample_data: Vec<Vec<u8>> // The bytes in the samples -127 - 127
 }
 
