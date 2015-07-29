@@ -177,9 +177,7 @@ fn read_0_padded_string(reader: &mut Read, len: usize) -> Result<String, io::Err
 	try!(read_all(reader,&mut data));
 	let mut str = String::new();
 	for byte in data {
-		if byte != 0 {
-			str.push(byte as char);
-		}
+		str.push(byte as char);
 	}
 
 	Ok(str)
