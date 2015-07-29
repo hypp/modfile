@@ -40,11 +40,14 @@ pub struct SampleInfo {
 	pub repeat_start: u16, // In words from start of sample data, so multiply by 2
 	/// Repeat length in words
 	pub repeat_length: u16, // Number of words to loop, multiply by 2
+	/// The sample data. 8 bit signed.
+	pub data: Vec<u8> // The bytes in the samples -127 - 127
 }
 
 impl SampleInfo {
 	pub fn new() -> SampleInfo {
-		SampleInfo{name: String::new(), length:0, finetune:0, volume:0, repeat_start:0, repeat_length:0}
+		SampleInfo{name: String::new(), length:0, finetune:0, volume:0, repeat_start:0, 
+			repeat_length:0, data: Vec::new()}
 	}
 }
 
@@ -133,15 +136,13 @@ pub struct PTModule {
 	pub mk: [u8; 4], // Set to M.K.
 	/// The patterns
 	pub patterns: Vec<Pattern>,
-	/// The sample data. 8 bit signed.
-	pub sample_data: Vec<Vec<u8>> // The bytes in the samples -127 - 127
 }
 
 impl PTModule {
 	pub fn new() -> PTModule {
 		let mut ptmod = PTModule{name: String::new(), sample_info: Vec::new(), length:0, 
 			nt_restart: 127, positions: Positions{data: [0; 128]}, mk: MAGIC_MK, 
-			patterns: Vec::new(), sample_data: Vec::new() };
+			patterns: Vec::new() };
 			
 		for _ in 0..DEFAULT_NUMBER_OF_SAMPLES {
 			ptmod.sample_info.push(SampleInfo::new());
@@ -294,12 +295,14 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFErr
 	}
 	
 	// And finally all samples
-	for sample_it in module.sample_data.iter() {
-		try!(write_all(writer,sample_it));
+	let mut num_written = 0;
+	for sample_it in module.sample_info.iter().filter(|si| si.length > 0) {
+		try!(write_all(writer,&sample_it.data));
+		num_written += 1;
 	}
 	
-	if num_samples != module.sample_data.len() {
-		return Err(PTMFError::Parse(format!("Warning! Number of samples '{}' does not match sample data '{}'", num_samples, module.sample_data.len())));
+	if num_samples != num_written {
+		return Err(PTMFError::Parse(format!("Warning! Number of samples '{}' does not match sample data '{}'", num_samples, num_written)));
 	}
 	
 	Ok(())
@@ -363,12 +366,12 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	}
 	
 	// Read all samples
-	for si in &module.sample_info {
+	for si in &mut module.sample_info {
 		if si.length > 0 {
 			let length_in_bytes = si.length * 2;
 			let mut data = vec![0u8; length_in_bytes as usize];
 			try!(read_all(reader,&mut data));
-			module.sample_data.push(data);
+			si.data = data;
 		}
 	}
 	
