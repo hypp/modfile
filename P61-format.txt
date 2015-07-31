@@ -1,0 +1,66 @@
+This a reverse engineered description of the file format of an 
+Amiga ProTracker file packed with The Player 6.1.
+
+The description is based on the file con610.2.G,
+some packed modules, and theplayer.c and p61a.c from libxmp.
+
+Packed sample format is not described yet.
+
+All data types are big endian.
+u16 = unsigned 16 bits
+u8 = unsigned 8 bits
+i8 = signed 8 bits
+
+Header:
+Position	Data type	Description
+0			u16 		Offset in file to sample data
+2			u8			Number of patterns
+3			u8			Number of samples
+
+For each sample:
+Position	Data type	Description
+0			u16			Sample length in words
+2			u8			Finetune
+3			u8			Volume
+4			u16			Repeat start in words, -1 = no repeat. 
+						Repeat is always to end of sample.
+						Note: P61con removes sample data after the original repeat length.
+						
+Pattern table. For each pattern:
+Position	Data type	Description
+0			u16			Offset from pattern data start to channel 0
+2			u16			Offset from pattern data start to channel 1
+4			u16			Offset from pattern data start to channel 2
+6			u16			Offset from pattern data start to channel 3
+Note: each channel can be used by several patterns.
+
+Multiple bytes until $ff:
+0			u8			Pattern play order
+
+Pattern data, at the offsets in Pattern table, relative from here, for each "row":
+Variable length formats:
+If first bytes bits are:
+pnnnnnni => 2 more bytes follow iiiicccc bbbbbbbb => Note, instrument and effect
+p110cccc => 1 more byte follows bbbbbbbb => Only effect
+p1110nnn => 1 more byte follows => nnniiiii => Note and instrument, no effect
+01111111 => 0 more bytes follow => Empty row, no compression info
+11111111 => 0 more bytes follow => Only compression info
+
+If high bit p is set (1) then compression info follows after each "row"
+00nnnnnn => n empty rows
+10nnnnnn => repeat current row n times
+01nnnnnn => 1 more byte follows oooooooo => go o bytes back in file and repeat n+1 "rows" 
+11nnnnnn => 2 more bytes follows oooooooo oooooooo => go o bytes back in file and repeat n+1 "rows". 
+I have not seen this in any file, only in the source.
+
+Notes: 
+The notes are stored as index into a period table.
+Effect 8 is converted to effect E8.
+Effect 0 is converted to effect 8.
+Effect 4,5,As data are stored as positive/negative values.
+
+Padding:
+0-1 bytes, sample data must start at even address/offset.
+
+Sample data, for each sample:
+0 to sample length*2	i8		Signed 8-bit sample data

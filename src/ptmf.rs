@@ -10,6 +10,27 @@ const DEFAULT_NUMBER_OF_CHANNELS_PER_ROW:usize = 4;
 const MAGIC_MK:[u8; 4] =['M' as u8, '.' as u8, 'K' as u8, '.' as u8];
 const MAGIC_FLT4:[u8; 4] =['F' as u8, 'L' as u8, 'T' as u8, '4' as u8];
 
+///
+/// Periods from http://greg-kennedy.com/tracker/modformat.html
+///
+///          C    C#   D    D#   E    F    F#   G    G#   A    A#   B
+/// Octave 1: 856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453
+/// Octave 2: 428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226
+/// Octave 3: 214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113
+///
+/// Octave 0:1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907
+/// Octave 4: 107, 101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57
+///
+static PERIODS: &'static [u16] = &[
+    1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907,
+    856,  808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
+    428,  404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226,
+    214,  202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113,
+	107,  101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57,
+];
+
+static NOTE_NAMES: &'static [&'static str] = &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
 /// Custom error enum
 #[derive(Debug)]
 pub enum PTMFError {
@@ -382,4 +403,155 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	};
 
 	Ok(module)
+}
+
+pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize, row_number: &mut usize, channel_number: usize, module: &mut PTModule) {
+	let first_byte = data[*current_pos];
+	*current_pos += 1;
+	
+	// If first bit is set, has compression info
+	let has_compression_info = (first_byte & 0x80 == 0x80);
+
+	// Is empty?
+	let is_empty = (first_byte & 0x7f == 0x7f);
+	// Only an effect, no note or instrument
+	let is_only_effect = (first_byte & 0b01110000 == 0b01100000);
+	// No effect, but note and instrument
+	let is_no_effect = (first_byte & 0b01111000 == 0b01110000);
+
+	println!("fb {:b} comp {} empty {} only {} no {}",
+		first_byte,has_compression_info,is_empty,is_only_effect,is_no_effect);
+		
+	if is_empty && has_compression_info {
+		// Do nothing
+	} else if is_only_effect {
+		panic!("Unhandled");
+	} else if is_no_effect {
+		panic!("Unhandled");
+	} else {
+		// Full command
+		// Two more bytes
+		let second_byte = data[*current_pos];
+		*current_pos += 1;
+
+		let third_byte = data[*current_pos];
+		*current_pos += 1;
+		
+		let noteno = (first_byte & 0b01111110) as usize >> 1;
+		let instrument = ((first_byte & 0b00000001) << 5) | ((second_byte & 0b11110000) >> 4);
+		let effect = (((second_byte & 0x0f) as u16) << 8) | (third_byte as u16);
+		
+		let period = PERIODS[noteno+11];
+		
+		println!("note {} period {} instrument {} effect {:X}",
+			noteno, period, instrument, effect);
+			
+		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
+		channel.period = period;
+		channel.sample_number = instrument;
+		channel.effect = effect;
+		*row_number += 1;
+	}
+}
+
+/// Read an Amiga ProTracker file packed with The Player 6.1
+pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
+	let mut module = PTModule::new();
+	
+	// Read the entire file to a Vec<u8>
+	// since the format uses a lot of offsets
+	// back and forth in the file.
+	let mut data:Vec<u8> = Vec::new();
+	let data_size = try!(reader.read_to_end(&mut data));
+	if data.len() != data_size {
+		return Err(PTMFError::Parse(format!("Failed to read all bytes {} {}", data.len(), data_size)));	
+	}
+	
+	let mut pos = 0;
+
+	let sample_offset = ((data[pos] as u16) << 8) | data[pos+1] as u16;
+	let num_patterns = data[pos+2];
+	let num_samples = data[pos+3];
+	
+	pos = pos+4;
+		
+	let mut sample_start = sample_offset as usize;
+	for i in 0..num_samples as usize {
+		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
+		let finetune = data[pos+2];
+		let volume = data[pos+3];
+		let mut repeat_start = ((data[pos+4] as u16) << 8) | data[pos+5] as u16;
+		let mut repeat_length = 0;
+		if repeat_start == 0xffff {
+			repeat_start = 0;
+		} else {
+			repeat_length = sample_length - repeat_start;
+		}
+	
+		let si = &mut module.sample_info[i];
+		si.length = sample_length;
+		si.finetune = finetune;
+		si.volume = volume;
+		si.repeat_start = repeat_start;
+		si.repeat_length = repeat_length;
+		
+		let sample_end = sample_start + (sample_length as usize) * 2;
+		let sample_data = &data[sample_start..sample_end];
+		si.data = sample_data.to_vec();
+		
+		// Move to next sample
+		sample_start = sample_end;
+		pos = pos+6;
+	}
+	
+	let mut pattern_offsets:Vec<usize> = Vec::new();
+	for _ in 0..num_patterns {
+		module.patterns.push(Pattern::new());
+		for _ in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+			let offset = (((data[pos] as u16) << 8) | data[pos+1] as u16) as usize;
+			pattern_offsets.push(offset);
+			
+			pos += 2;
+		}
+	}
+	
+	let mut length = 0;
+	loop {
+		let position = data[pos];
+		if position == 0xff {
+			break;
+		}
+		module.positions.data[length] = position;
+		
+		length += 1;
+		pos += 1;
+	}
+	
+	pos += 1;
+
+	module.length = length as u8;
+	
+	let pattern_start_offset = pos;
+	
+	// Pop removes from the end of Vec
+	pattern_offsets.reverse();
+	
+'outer:
+	for pattern_number in 0..num_patterns as usize {
+		for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+			let mut row_number:usize = 0;
+			let mut current_pos = pattern_start_offset + pattern_offsets.pop().unwrap();
+			println!("Offset {:X}",current_pos);
+			while row_number < DEFAULT_NUMBER_OF_ROWS_PER_PATTERN {
+
+				decode_p61_row(&data, &mut current_pos, pattern_number, &mut row_number, channel_number, &mut module);
+
+				break 'outer;
+				
+				row_number += 1;
+			}
+		}
+	}
+
+	return Ok(module)
 }
