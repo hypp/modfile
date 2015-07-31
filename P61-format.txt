@@ -43,15 +43,15 @@ If first bytes bits are:
 pnnnnnni => 2 more bytes follow iiiicccc bbbbbbbb => Note, instrument and effect
 p110cccc => 1 more byte follows bbbbbbbb => Only effect
 p1110nnn => 1 more byte follows => nnniiiii => Note and instrument, no effect
-01111111 => 0 more bytes follow => Empty row, no compression info
-11111111 => 0 more bytes follow => Only compression info
+p1111111 => 0 more bytes follow => Empty row
 
 If high bit p is set (1) then compression info follows after each "row"
 00nnnnnn => n empty rows
 10nnnnnn => repeat current row n times
 01nnnnnn => 1 more byte follows oooooooo => go o bytes back in file and repeat n+1 "rows" 
+If the "row" was empty row, then there should be no empty row. WTF?
 11nnnnnn => 2 more bytes follows oooooooo oooooooo => go o bytes back in file and repeat n+1 "rows". 
-I have not seen this in any file, only in the source.
+If the "row" was empty row, then there should be no empty row. WTF?
 
 Notes: 
 The notes are stored as index into a period table.

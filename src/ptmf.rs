@@ -74,6 +74,7 @@ impl SampleInfo {
 
 /// Data for one channel
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct Channel {
 	/// The period value used on Amiga for playback. Represents the frequency.
 	pub period: u16, // Really u12
@@ -410,24 +411,61 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 	*current_pos += 1;
 	
 	// If first bit is set, has compression info
-	let has_compression_info = (first_byte & 0x80 == 0x80);
+	let has_compression_info = first_byte & 0x80 == 0x80;
 
 	// Is empty?
-	let is_empty = (first_byte & 0x7f == 0x7f);
+	let is_empty = first_byte & 0x7f == 0x7f;
 	// Only an effect, no note or instrument
-	let is_only_effect = (first_byte & 0b01110000 == 0b01100000);
+	let is_only_effect = first_byte & 0b01110000 == 0b01100000;
 	// No effect, but note and instrument
-	let is_no_effect = (first_byte & 0b01111000 == 0b01110000);
+	let is_no_effect = first_byte & 0b01111000 == 0b01110000;
 
 	println!("fb {:b} comp {} empty {} only {} no {}",
 		first_byte,has_compression_info,is_empty,is_only_effect,is_no_effect);
 		
-	if is_empty && has_compression_info {
-		// Do nothing
+	if is_empty {
+		*row_number += 1;
 	} else if is_only_effect {
-		panic!("Unhandled");
+		// Only effect command
+		// One more byte
+		let second_byte = data[*current_pos];
+		*current_pos += 1;
+		
+		let mut effect:u16 = 0;
+		let effect_type = first_byte & 0b00001111;
+		if (effect_type == 0x5 || effect_type == 0x6 || 
+		    effect_type == 0xa) && (second_byte & 0x80 == 0x80) {
+			panic!("Unhandled");
+		} else if effect_type == 0x8 {
+			effect = (second_byte as u16);		
+		} else if effect_type == 0xd || effect_type == 0xb {
+			panic!("Unhandled");
+		} else {
+			effect = (((first_byte & 0x0f) as u16) << 8) | (second_byte as u16);
+		}
+		
+		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
+		channel.effect = effect;
+		*row_number += 1;
+		
 	} else if is_no_effect {
-		panic!("Unhandled");
+		// Note and instrument, but no effect
+		let second_byte = data[*current_pos];
+		*current_pos += 1;
+
+		let noteno = (((first_byte & 0b00000111) << 3) | ((second_byte & 0b11100000) >> 5)) as usize;
+		let instrument = (second_byte & 0b00011111);
+
+		let period = PERIODS[noteno+11];
+		
+		println!("note {} period {} instrument {} effect {:X}",
+			noteno, period, instrument, 0);
+			
+		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
+		channel.period = period;
+		channel.sample_number = instrument;
+		*row_number += 1;
+		
 	} else {
 		// Full command
 		// Two more bytes
@@ -439,18 +477,94 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 		
 		let noteno = (first_byte & 0b01111110) as usize >> 1;
 		let instrument = ((first_byte & 0b00000001) << 5) | ((second_byte & 0b11110000) >> 4);
-		let effect = (((second_byte & 0x0f) as u16) << 8) | (third_byte as u16);
+
+		// TODO fix DRY
+		let mut effect:u16 = 0;
+		let effect_type = second_byte & 0b00001111;
+		if (effect_type == 0x5 || effect_type == 0x6 || 
+		    effect_type == 0xa) && (third_byte & 0x80 == 0x80) {
+			panic!("Unhandled");
+		} else if effect_type == 0x8 {
+			effect = (third_byte as u16);		
+		} else if effect_type == 0xd || effect_type == 0xb {
+			panic!("Unhandled");
+		} else {
+			effect = (((second_byte & 0x0f) as u16) << 8) | (third_byte as u16);
+		}
+
 		
 		let period = PERIODS[noteno+11];
 		
-		println!("note {} period {} instrument {} effect {:X}",
-			noteno, period, instrument, effect);
-			
 		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
 		channel.period = period;
 		channel.sample_number = instrument;
 		channel.effect = effect;
 		*row_number += 1;
+	}
+	
+	if has_compression_info {
+		let first_byte = data[*current_pos];
+		*current_pos += 1;
+		
+		let ctype = first_byte & 0b11000000;
+		if ctype == 0b00000000 {
+			// Empty rows
+			let num_empty_rows = first_byte & 0b00111111;
+			*row_number += num_empty_rows as usize;
+			println!("Empty {}",num_empty_rows);
+		} else if ctype  == 0b10000000 {
+			// Repeat current row n times
+			let repeat_count = first_byte & 0b00111111;
+			let channel = module.patterns[pattern_number].rows[*row_number-1].channels[channel_number].clone();
+			for _ in 0..repeat_count {
+				let new_channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
+				new_channel.period = channel.period;
+				new_channel.sample_number = channel.sample_number;
+				new_channel.effect = channel.effect;
+				
+				println!("repeat: {:?}",new_channel);
+
+				*row_number += 1;
+			}
+		} else if ctype == 0b01000000 || ctype == 0b11000000 {
+			// Copy previous data from offset
+			let mut copy_offset:u16 = 0;
+			
+			if is_empty {
+				// Special handling when empty ... WTF
+				*row_number -= 1;
+			}
+			
+			let repeat_count = (first_byte & 0b00111111) + 1;
+			
+			if ctype == 0b01000000 {
+				// Copy previous data from 8-bit offset
+				let second_byte = data[*current_pos] as u16;
+				*current_pos += 1;
+				
+				copy_offset = second_byte;
+			
+			} else {
+				// Copy previous data from 16-bit offset
+				let second_byte = data[*current_pos] as u16;
+				*current_pos += 1;
+
+				let third_byte = data[*current_pos] as u16;
+				*current_pos += 1;
+				
+				copy_offset = (second_byte << 8) | third_byte;
+			}
+			
+			let mut new_pos = *current_pos - copy_offset as usize;
+			
+			// Recurse
+			for _ in 0..repeat_count {
+				println!("Recurse {} {}", repeat_count, new_pos);
+				decode_p61_row(&data, &mut new_pos, pattern_number, row_number, channel_number, module);
+			}
+		} else {
+			panic!("Should never happen!");
+		}		
 	}
 }
 
@@ -545,12 +659,13 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 			while row_number < DEFAULT_NUMBER_OF_ROWS_PER_PATTERN {
 
 				decode_p61_row(&data, &mut current_pos, pattern_number, &mut row_number, channel_number, &mut module);
-
-				break 'outer;
 				
-				row_number += 1;
+				if row_number > 37 {
+	//				break 'outer;
+				}
 			}
 		}
+		break 'outer;
 	}
 
 	return Ok(module)
