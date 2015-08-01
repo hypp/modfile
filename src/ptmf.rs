@@ -21,7 +21,7 @@ const MAGIC_FLT4:[u8; 4] =['F' as u8, 'L' as u8, 'T' as u8, '4' as u8];
 /// Octave 0:1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907
 /// Octave 4: 107, 101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57
 ///
-static PERIODS: &'static [u16] = &[
+pub static PERIODS: &'static [u16] = &[
     1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907,
     856,  808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
     428,  404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226,
@@ -29,7 +29,7 @@ static PERIODS: &'static [u16] = &[
 	107,  101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57,
 ];
 
-static NOTE_NAMES: &'static [&'static str] = &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+pub static NOTE_NAMES: &'static [&'static str] = &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 /// Custom error enum
 #[derive(Debug)]
@@ -406,7 +406,46 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	Ok(module)
 }
 
-pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize, row_number: &mut usize, channel_number: usize, module: &mut PTModule) {
+fn decode_p61_effect(effect_type:u8, params: u8) -> (bool, u16) {
+
+	let mut effect:u16;
+	let mut eop = false;
+
+	let effect_type = effect_type & 0x0f;
+	
+	if (effect_type == 0x5 || effect_type == 0x6 || 
+		effect_type == 0xa) && (params & 0x80 == 0x80) {
+		// P61con changes two nibble commands to signed/unsigned
+		// Let's change it back
+		let fixed_params = (0x100 - params as u16) << 4;
+		println!("Fixed param: {:X}",fixed_params);
+		
+		effect = ((effect_type as u16) << 8) | (fixed_params as u16);
+
+	} else if effect_type == 0x8 {
+		// P61con changes effect 0 to 8
+		// Let's change it back
+		effect = params as u16;		
+
+	} else if effect_type == 0xb {
+		// End
+		panic!("Unhandled");	
+	} else if effect_type == 0xd {
+		// End
+		effect = ((effect_type as u16) << 8) | (params as u16);
+		eop = true;
+	} else {
+		effect = ((effect_type as u16) << 8) | (params as u16);
+	}
+
+	(eop, effect)
+}
+
+/// Decode at least one row
+/// Returns true if the pattern ends here due to effect 0xd or 0xb
+fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize, row_number: &mut usize, channel_number: usize, module: &mut PTModule) -> bool {
+	let mut end_of_pattern = false;
+
 	let first_byte = data[*current_pos];
 	*current_pos += 1;
 	
@@ -420,6 +459,7 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 	// No effect, but note and instrument
 	let is_no_effect = first_byte & 0b01111000 == 0b01110000;
 
+	println!("Pattern {} Row {} Channel {}", pattern_number, row_number, channel_number);
 	println!("fb {:b} comp {} empty {} only {} no {}",
 		first_byte,has_compression_info,is_empty,is_only_effect,is_no_effect);
 		
@@ -431,36 +471,30 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 		let second_byte = data[*current_pos];
 		*current_pos += 1;
 		
-		let mut effect:u16 = 0;
-		let effect_type = first_byte & 0b00001111;
-		if (effect_type == 0x5 || effect_type == 0x6 || 
-		    effect_type == 0xa) && (second_byte & 0x80 == 0x80) {
-			panic!("Unhandled");
-		} else if effect_type == 0x8 {
-			effect = (second_byte as u16);		
-		} else if effect_type == 0xd || effect_type == 0xb {
-			panic!("Unhandled");
-		} else {
-			effect = (((first_byte & 0x0f) as u16) << 8) | (second_byte as u16);
+		let (eop, effect) = decode_p61_effect(first_byte & 0x0f, second_byte);
+		if eop && has_compression_info {
+			panic!("Should never happen");
 		}
-		
+		end_of_pattern = eop;
+				
 		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
 		channel.effect = effect;
-		*row_number += 1;
 		
+		*row_number += 1;		
 	} else if is_no_effect {
 		// Note and instrument, but no effect
 		let second_byte = data[*current_pos];
 		*current_pos += 1;
 
 		let noteno = (((first_byte & 0b00000111) << 3) | ((second_byte & 0b11100000) >> 5)) as usize;
-		let instrument = (second_byte & 0b00011111);
+		let instrument = second_byte & 0b00011111;
 
-		let period = PERIODS[noteno+11];
-		
-		println!("note {} period {} instrument {} effect {:X}",
-			noteno, period, instrument, 0);
-			
+		let period = if noteno == 0 {
+			0
+		} else {
+			PERIODS[noteno+11]
+		};
+					
 		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
 		channel.period = period;
 		channel.sample_number = instrument;
@@ -478,27 +512,23 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 		let noteno = (first_byte & 0b01111110) as usize >> 1;
 		let instrument = ((first_byte & 0b00000001) << 5) | ((second_byte & 0b11110000) >> 4);
 
-		// TODO fix DRY
-		let mut effect:u16 = 0;
-		let effect_type = second_byte & 0b00001111;
-		if (effect_type == 0x5 || effect_type == 0x6 || 
-		    effect_type == 0xa) && (third_byte & 0x80 == 0x80) {
-			panic!("Unhandled");
-		} else if effect_type == 0x8 {
-			effect = (third_byte as u16);		
-		} else if effect_type == 0xd || effect_type == 0xb {
-			panic!("Unhandled");
-		} else {
-			effect = (((second_byte & 0x0f) as u16) << 8) | (third_byte as u16);
+		let (eop, effect) = decode_p61_effect(second_byte & 0x0f, third_byte);
+		if eop && has_compression_info {
+			panic!("Should never happen");
 		}
-
+		end_of_pattern = eop;
 		
-		let period = PERIODS[noteno+11];
+		let period = if noteno == 0 {
+			0
+		} else {
+			PERIODS[noteno+11]
+		};
 		
 		let channel = &mut module.patterns[pattern_number].rows[*row_number].channels[channel_number];
 		channel.period = period;
 		channel.sample_number = instrument;
 		channel.effect = effect;
+		
 		*row_number += 1;
 	}
 	
@@ -511,7 +541,6 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 			// Empty rows
 			let num_empty_rows = first_byte & 0b00111111;
 			*row_number += num_empty_rows as usize;
-			println!("Empty {}",num_empty_rows);
 		} else if ctype  == 0b10000000 {
 			// Repeat current row n times
 			let repeat_count = first_byte & 0b00111111;
@@ -522,13 +551,11 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 				new_channel.sample_number = channel.sample_number;
 				new_channel.effect = channel.effect;
 				
-				println!("repeat: {:?}",new_channel);
-
 				*row_number += 1;
 			}
 		} else if ctype == 0b01000000 || ctype == 0b11000000 {
 			// Copy previous data from offset
-			let mut copy_offset:u16 = 0;
+			let mut copy_offset:u16;
 			
 			if is_empty {
 				// Special handling when empty ... WTF
@@ -560,12 +587,17 @@ pub fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: u
 			// Recurse
 			for _ in 0..repeat_count {
 				println!("Recurse {} {}", repeat_count, new_pos);
-				decode_p61_row(&data, &mut new_pos, pattern_number, row_number, channel_number, module);
+				let eop = decode_p61_row(&data, &mut new_pos, pattern_number, row_number, channel_number, module);
+				if eop {
+					panic!("Should never happen");
+				}
 			}
 		} else {
 			panic!("Should never happen!");
 		}		
 	}
+	
+	end_of_pattern
 }
 
 /// Read an Amiga ProTracker file packed with The Player 6.1
@@ -587,8 +619,20 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	let num_patterns = data[pos+2];
 	let num_samples = data[pos+3];
 	
+	let is_delta_8_bit = num_samples & 0x80 == 0x80;
+	let is_delta_4_bit = num_samples & 0x40 == 0x40;
+	let num_samples = num_samples & 0b00111111;
+	
 	pos = pos+4;
-		
+	
+	if is_delta_8_bit {
+		return Err(PTMFError::Parse(format!("Can not handle 8-bit delta packed samples")));
+	}
+
+	if is_delta_4_bit {
+		return Err(PTMFError::Parse(format!("Can not handle 4-bit delta packed samples")));
+	}
+
 	let mut sample_start = sample_offset as usize;
 	for i in 0..num_samples as usize {
 		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
@@ -652,20 +696,50 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	
 'outer:
 	for pattern_number in 0..num_patterns as usize {
+	
+		let mut row_number = [0usize; DEFAULT_NUMBER_OF_CHANNELS_PER_ROW];
+		let mut current_pos = [0usize; DEFAULT_NUMBER_OF_CHANNELS_PER_ROW];
+		
 		for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
-			let mut row_number:usize = 0;
-			let mut current_pos = pattern_start_offset + pattern_offsets.pop().unwrap();
-			println!("Offset {:X}",current_pos);
-			while row_number < DEFAULT_NUMBER_OF_ROWS_PER_PATTERN {
-
-				decode_p61_row(&data, &mut current_pos, pattern_number, &mut row_number, channel_number, &mut module);
-				
-				if row_number > 37 {
-	//				break 'outer;
+			row_number[channel_number] = 0;
+			current_pos[channel_number] = pattern_start_offset + pattern_offsets.pop().unwrap();
+		}
+		
+		let mut sum_done = 0;
+		while sum_done != DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+			sum_done = 0;
+			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+				if row_number[channel_number] >= DEFAULT_NUMBER_OF_ROWS_PER_PATTERN {
+					sum_done += 1;
+				} else {
+					let eop = decode_p61_row(&data, &mut current_pos[channel_number], pattern_number, &mut row_number[channel_number], channel_number, &mut module);				
+					if eop {
+						// This will make sure we exit the while loop early
+						// but still process any remaining channels
+						sum_done = DEFAULT_NUMBER_OF_CHANNELS_PER_ROW;
+					}
 				}
+			} // for
+		} // while
+		
+		// If we exit the while loop early above, make sure that we clear out any data
+		// that we parsed but shouldn't really be there
+		let truncate_pos = row_number.iter().min().unwrap();
+		println!("Truncate {}", truncate_pos);
+		for row_number in *truncate_pos..DEFAULT_NUMBER_OF_ROWS_PER_PATTERN as usize {
+			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+				println!("Truncate Pattern {} Row {} Channel {}",pattern_number,row_number,channel_number);
+				let channel = &mut module.patterns[pattern_number].rows[row_number].channels[channel_number];
+				channel.period = 0;
+				channel.sample_number = 0;
+				channel.effect = 0;
 			}
 		}
-		break 'outer;
+		
+			
+//		if pattern_number == 2 {
+//			break 'outer;
+//		}
 	}
 
 	return Ok(module)

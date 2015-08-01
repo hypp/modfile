@@ -15,7 +15,9 @@ Header:
 Position	Data type	Description
 0			u16 		Offset in file to sample data
 2			u8			Number of patterns
-3			u8			Number of samples
+3			u8			Number of samples. 
+						If bit 7 is set (0x80), 8-bit delta packed samples.
+						If bit 6 is set (0x40), 4-bit delta packed samples.
 
 For each sample:
 Position	Data type	Description
