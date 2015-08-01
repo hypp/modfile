@@ -510,7 +510,7 @@ fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize
 		*current_pos += 1;
 		
 		let noteno = (first_byte & 0b01111110) as usize >> 1;
-		let instrument = ((first_byte & 0b00000001) << 5) | ((second_byte & 0b11110000) >> 4);
+		let instrument = ((first_byte & 0b00000001) << 4) | ((second_byte & 0b11110000) >> 4);
 
 		let (eop, effect) = decode_p61_effect(second_byte & 0x0f, third_byte);
 		if eop && has_compression_info {
