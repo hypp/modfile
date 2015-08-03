@@ -1,7 +1,7 @@
 This a reverse engineered description of the file format of an 
 Amiga ProTracker file packed with The Player 6.1.
 
-The description is based on the file con610.2.G,
+The description is based on the file P6112-Play.i, con610.2.G,
 some packed modules, and theplayer.c and p61a.c from libxmp.
 
 Packed sample format is not described yet.
@@ -18,6 +18,9 @@ Position	Data type	Description
 3			u8			Number of samples. 
 						If bit 7 is set (0x80), 8-bit delta packed samples.
 						If bit 6 is set (0x40), 4-bit delta packed samples.
+						
+If bit 6 in position 3 is set (0x40) there are 4 more bytes in the header,
+and samples are packed.
 
 For each sample:
 Position	Data type	Description

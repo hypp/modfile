@@ -3,6 +3,7 @@ use std::io::Read;
 use std::fmt;
 use std::cmp;
 use std::io;
+use std::num::Wrapping;
 
 const DEFAULT_NUMBER_OF_SAMPLES:usize = 31;
 const DEFAULT_NUMBER_OF_ROWS_PER_PATTERN:usize = 64;
@@ -625,10 +626,6 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	
 	pos = pos+4;
 	
-	if is_delta_8_bit {
-		return Err(PTMFError::Parse(format!("Can not handle 8-bit delta packed samples")));
-	}
-
 	if is_delta_4_bit {
 		return Err(PTMFError::Parse(format!("Can not handle 4-bit delta packed samples")));
 	}
@@ -652,13 +649,35 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 		si.volume = volume;
 		si.repeat_start = repeat_start;
 		si.repeat_length = repeat_length;
+
+		// TODO 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
+		// It is possible to combine 8-bit and 4-bit delta
 		
-		let sample_end = sample_start + (sample_length as usize) * 2;
-		let sample_data = &data[sample_start..sample_end];
-		si.data = sample_data.to_vec();
+		if is_delta_8_bit {
+			let sample_end = sample_start + (sample_length as usize) * 2;
+			let mut delta:u8 = data[sample_start];
+			// First byte get copied unmodified
+			si.data.push(delta);
+			
+			for i in sample_start+1..sample_end {
+				println!("{} {} {}",i,delta, data[i]);
+				delta = (Wrapping(delta) - Wrapping(data[i])).0;
+				si.data.push(delta);
+			}
+			
+			// Move to next sample
+			sample_start = sample_end;
+		
+		} else {
+			let sample_end = sample_start + (sample_length as usize) * 2;
+			let sample_data = &data[sample_start..sample_end];
+			si.data = sample_data.to_vec();
+
+			// Move to next sample
+			sample_start = sample_end;
+		}
 		
 		// Move to next sample
-		sample_start = sample_end;
 		pos = pos+6;
 	}
 	
