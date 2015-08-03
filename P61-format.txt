@@ -4,12 +4,12 @@ Amiga ProTracker file packed with The Player 6.1.
 The description is based on the file P6112-Play.i, con610.2.G,
 some packed modules, and theplayer.c and p61a.c from libxmp.
 
-Packed sample format is not described yet.
-
 All data types are big endian.
-u16 = unsigned 16 bits
-u8 = unsigned 8 bits
-i8 = signed 8 bits
+u16 = unsigned 16 bits.
+u8 = unsigned 8 bits.
+i8 = signed 8 bits.
+
+Bits in a byte are numbered 7 to 0.
 
 Header:
 Position	Data type	Description
@@ -21,6 +21,7 @@ Position	Data type	Description
 						
 If bit 6 in position 3 is set (0x40) there are 4 more bytes in the header,
 and samples are packed.
+4			u32			Total unpacked sample length
 
 For each sample:
 Position	Data type	Description
@@ -82,5 +83,18 @@ Sample data, for each sample:
 		si.data.push(delta);
 	}
 
+4-bit delta unpacking (written in Rust):
+	static DELTA_4BIT: &'static [u8] = &[0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 
+										 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, 0xff];
 
-
+	let mut delta:u8 = 0;
+	for i in sample_start..sample_end {
+		let hi = ((data[i] & 0xf0) >> 4) as usize;
+		let lo = (data[i] & 0x0f) as usize;
+		let subhi = DELTA_4BIT[hi];
+		delta = (Wrapping(delta) - Wrapping(subhi)).0;
+		si.data.push(delta);
+		let sublo = DELTA_4BIT[lo];
+		delta = (Wrapping(delta) - Wrapping(sublo)).0;
+		si.data.push(delta);				
+	}
