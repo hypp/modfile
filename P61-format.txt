@@ -26,6 +26,7 @@ For each sample:
 Position	Data type	Description
 0			u16			Sample length in words
 2			u8			Finetune
+						If bit 7 is set (0x80), sample is 4-bit delta packed
 3			u8			Volume
 4			u16			Repeat start in words, -1 = no repeat. 
 						Repeat is always to end of sample.
@@ -69,3 +70,17 @@ Padding:
 
 Sample data, for each sample:
 0 to sample length*2	i8		Signed 8-bit sample data
+
+
+8-bit delta unpacking (written in Rust):
+	let mut delta:u8 = data[sample_start];
+	// First byte get copied unmodified
+	si.data.push(delta);
+	
+	for i in sample_start+1..sample_end {
+		delta = (Wrapping(delta) - Wrapping(data[i])).0;
+		si.data.push(delta);
+	}
+
+
+
