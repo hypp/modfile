@@ -639,6 +639,9 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	let mut sample_start = sample_offset as usize;
 	for i in 0..num_samples as usize {
 		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
+		if sample_length & 0x8000 == 0x8000 {
+			return Err(PTMFError::Parse(format!("Currently no support for negative sample length: {} {}", i, sample_length)));	
+		}
 		let finetune = data[pos+2];
 		let volume = data[pos+3];
 		let mut repeat_start = ((data[pos+4] as u16) << 8) | data[pos+5] as u16;
