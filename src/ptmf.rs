@@ -619,6 +619,17 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	
 	let mut pos = 0;
 
+	if data[0] == 'P' as u8 && 
+		data[1] == '6' as u8 &&
+		data[2] == '1' as u8 &&
+		data[3] == 'A' as u8 {
+		// Remove header
+		data.remove(0);
+		data.remove(0);
+		data.remove(0);
+		data.remove(0);
+	}
+
 	let sample_offset = ((data[pos] as u16) << 8) | data[pos+1] as u16;
 	let num_patterns = data[pos+2];
 	let num_samples = data[pos+3];
@@ -751,29 +762,33 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 		}
 		
 		let mut truncate_pos = DEFAULT_NUMBER_OF_ROWS_PER_PATTERN;
-		let mut sum_done = 0;
-		while sum_done != DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
-			sum_done = 0;
-			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
-				if current_pos[channel_number] >= sample_offset as usize {
-					// This one is done
-					sum_done += 1;
-					continue;
-				}
+		loop {
 			
-				if row_number[channel_number] >= truncate_pos {
-					sum_done += 1;
-				} else {
-					let eop = decode_p61_row(&data, &mut current_pos[channel_number], pattern_number, &mut row_number[channel_number], channel_number, &mut module);				
-					if eop {
-						// This will make sure we exit the while loop early
-						// but still process any remaining channels
-						sum_done = DEFAULT_NUMBER_OF_CHANNELS_PER_ROW;
-						truncate_pos = row_number[channel_number];
-					}
+			// We always need to decode the channel with the lowest row number first
+			// to see if it contains a pattern break or jump
+			
+			let mut current_channel = 0;
+			let mut lowest = DEFAULT_NUMBER_OF_ROWS_PER_PATTERN;
+			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+				if row_number[channel_number] < lowest {
+					lowest = row_number[channel_number];
+					current_channel = channel_number;
 				}
-			} // for
-		} // while
+			}
+			
+			if lowest >= truncate_pos {
+				break;
+			}
+
+//			println!("P {} C {} R {} P {:X}",pattern_number,current_channel,row_number[current_channel],current_pos[current_channel]);
+			let eop = decode_p61_row(&data, &mut current_pos[current_channel], pattern_number, &mut row_number[current_channel], current_channel, &mut module);				
+			if eop {
+				// This will make sure we exit the while loop early
+				// but still process any remaining channels
+				truncate_pos = row_number[current_channel];
+			}
+						
+		} // loop
 		
 		// If we exit the while loop early above, make sure that we clear out any data
 		// that we parsed but shouldn't really be there
