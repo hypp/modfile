@@ -32,6 +32,9 @@ pub static PERIODS: &'static [u16] = &[
 
 pub static NOTE_NAMES: &'static [&'static str] = &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+static DELTA_4BIT: &'static [u8] = &[0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 
+									 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, 0xff];
+
 /// Custom error enum
 #[derive(Debug)]
 pub enum PTMFError {
@@ -619,17 +622,20 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	let sample_offset = ((data[pos] as u16) << 8) | data[pos+1] as u16;
 	let num_patterns = data[pos+2];
 	let num_samples = data[pos+3];
+	pos += 4;
 	
 	let is_delta_8_bit = num_samples & 0x80 == 0x80;
 	let is_delta_4_bit = num_samples & 0x40 == 0x40;
 	let num_samples = num_samples & 0b00111111;
 	
-	pos = pos+4;
-	
+	let mut unpacked_samples_length:u32 = 0; 
 	if is_delta_4_bit {
-		return Err(PTMFError::Parse(format!("Can not handle 4-bit delta packed samples")));
+		for _ in 0..4 {
+			unpacked_samples_length = (unpacked_samples_length << 8) + data[pos] as u32;
+			pos += 1;
+		}
 	}
-
+	
 	let mut sample_start = sample_offset as usize;
 	for i in 0..num_samples as usize {
 		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
@@ -643,24 +649,41 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 			repeat_length = sample_length - repeat_start;
 		}
 	
+		let is_sample_delta_4_bit = finetune & 0x80 == 0x80;
+	
 		let si = &mut module.sample_info[i];
 		si.length = sample_length;
-		si.finetune = finetune;
+		si.finetune = finetune & 0x0f;
 		si.volume = volume;
 		si.repeat_start = repeat_start;
 		si.repeat_length = repeat_length;
 
-		// TODO 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
+		// 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
 		// It is possible to combine 8-bit and 4-bit delta
-		
-		if is_delta_8_bit {
+		if is_delta_4_bit && is_sample_delta_4_bit {
+			let sample_end = sample_start + sample_length as usize; // Packed length is half of unpacked length
+			let mut delta:u8 = 0;
+			for i in sample_start..sample_end {
+				let hi = ((data[i] & 0xf0) >> 4) as usize;
+				let lo = (data[i] & 0x0f) as usize;
+				let subhi = DELTA_4BIT[hi];
+				delta = (Wrapping(delta) - Wrapping(subhi)).0;
+				si.data.push(delta);
+				let sublo = DELTA_4BIT[lo];
+				delta = (Wrapping(delta) - Wrapping(sublo)).0;
+				si.data.push(delta);				
+			}
+			
+			// Move to next sample
+			sample_start = sample_end;
+			
+		} else if is_delta_8_bit {
 			let sample_end = sample_start + (sample_length as usize) * 2;
 			let mut delta:u8 = data[sample_start];
 			// First byte get copied unmodified
 			si.data.push(delta);
 			
 			for i in sample_start+1..sample_end {
-				println!("{} {} {}",i,delta, data[i]);
 				delta = (Wrapping(delta) - Wrapping(data[i])).0;
 				si.data.push(delta);
 			}
@@ -675,6 +698,7 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 
 			// Move to next sample
 			sample_start = sample_end;
+			
 		}
 		
 		// Move to next sample
