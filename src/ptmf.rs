@@ -650,9 +650,6 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	let mut sample_start = sample_offset as usize;
 	for i in 0..num_samples as usize {
 		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
-		if sample_length & 0x8000 == 0x8000 {
-			return Err(PTMFError::Parse(format!("Currently no support for negative sample length: {} {}", i, sample_length)));	
-		}
 		let finetune = data[pos+2];
 		let volume = data[pos+3];
 		let mut repeat_start = ((data[pos+4] as u16) << 8) | data[pos+5] as u16;
@@ -662,57 +659,84 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 		} else {
 			repeat_length = sample_length - repeat_start;
 		}
-	
-		let is_sample_delta_4_bit = finetune & 0x80 == 0x80;
-	
-		let si = &mut module.sample_info[i];
-		si.length = sample_length;
-		si.finetune = finetune & 0x0f;
-		si.volume = volume;
-		si.repeat_start = repeat_start;
-		si.repeat_length = repeat_length;
+				
+		let signed_sample_length = sample_length as i16;
+		if signed_sample_length < 0 && signed_sample_length >= -31 {
+			// This means that the sample uses the same sample data as
+			// another sample
+			let sample_index = (-1 * signed_sample_length - 1) as usize;
+			
+			let length = module.sample_info[sample_index].length;
+			let data = module.sample_info[sample_index].data.clone();
 
-		// 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
-		// It is possible to combine 8-bit and 4-bit delta
-		if is_delta_4_bit && is_sample_delta_4_bit {
-			let sample_end = sample_start + sample_length as usize; // Packed length is half of unpacked length
-			let mut delta:u8 = 0;
-			for i in sample_start..sample_end {
-				let hi = ((data[i] & 0xf0) >> 4) as usize;
-				let lo = (data[i] & 0x0f) as usize;
-				let subhi = DELTA_4BIT[hi];
-				delta = (Wrapping(delta) - Wrapping(subhi)).0;
-				si.data.push(delta);
-				let sublo = DELTA_4BIT[lo];
-				delta = (Wrapping(delta) - Wrapping(sublo)).0;
-				si.data.push(delta);				
+			// Fix repeat length
+			if repeat_start == 0xffff {
+				repeat_start = 0;
+			} else {
+				repeat_length = length - repeat_start;
 			}
 			
-			// Move to next sample
-			sample_start = sample_end;
-			
-		} else if is_delta_8_bit {
-			let sample_end = sample_start + (sample_length as usize) * 2;
-			let mut delta:u8 = data[sample_start];
-			// First byte get copied unmodified
-			si.data.push(delta);
-			
-			for i in sample_start+1..sample_end {
-				delta = (Wrapping(delta) - Wrapping(data[i])).0;
-				si.data.push(delta);
-			}
-			
-			// Move to next sample
-			sample_start = sample_end;
-		
+			let si = &mut module.sample_info[i];
+			si.length = length;
+			si.finetune = finetune & 0x0f;
+			si.volume = volume;
+			si.repeat_start = repeat_start;
+			si.repeat_length = repeat_length;
+			si.data = data;
+
 		} else {
-			let sample_end = sample_start + (sample_length as usize) * 2;
-			let sample_data = &data[sample_start..sample_end];
-			si.data = sample_data.to_vec();
+		
+			let is_sample_delta_4_bit = finetune & 0x80 == 0x80;
+		
+			let si = &mut module.sample_info[i];
+			si.length = sample_length;
+			si.finetune = finetune & 0x0f;
+			si.volume = volume;
+			si.repeat_start = repeat_start;
+			si.repeat_length = repeat_length;
 
-			// Move to next sample
-			sample_start = sample_end;
+			// 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
+			// It is possible to combine 8-bit and 4-bit delta
+			if is_delta_4_bit && is_sample_delta_4_bit {
+				let sample_end = sample_start + sample_length as usize; // Packed length is half of unpacked length
+				let mut delta:u8 = 0;
+				for i in sample_start..sample_end {
+					let hi = ((data[i] & 0xf0) >> 4) as usize;
+					let lo = (data[i] & 0x0f) as usize;
+					let subhi = DELTA_4BIT[hi];
+					delta = (Wrapping(delta) - Wrapping(subhi)).0;
+					si.data.push(delta);
+					let sublo = DELTA_4BIT[lo];
+					delta = (Wrapping(delta) - Wrapping(sublo)).0;
+					si.data.push(delta);				
+				}
+				
+				// Move to next sample
+				sample_start = sample_end;
+				
+			} else if is_delta_8_bit {
+				let sample_end = sample_start + (sample_length as usize) * 2;
+				let mut delta:u8 = data[sample_start];
+				// First byte get copied unmodified
+				si.data.push(delta);
+				
+				for i in sample_start+1..sample_end {
+					delta = (Wrapping(delta) - Wrapping(data[i])).0;
+					si.data.push(delta);
+				}
+				
+				// Move to next sample
+				sample_start = sample_end;
 			
+			} else {
+				let sample_end = sample_start + (sample_length as usize) * 2;
+				let sample_data = &data[sample_start..sample_end];
+				si.data = sample_data.to_vec();
+
+				// Move to next sample
+				sample_start = sample_end;
+				
+			}
 		}
 		
 		// Move to next sample
