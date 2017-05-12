@@ -35,6 +35,20 @@ pub static NOTE_NAMES: &'static [&'static str] = &["C", "C#", "D", "D#", "E", "F
 static DELTA_4BIT: &'static [u8] = &[0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 
 									 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, 0xff];
 
+pub static EFFECT_NAMES: &'static [&'static str] = &[
+		// Normal commads 0-F
+		"Arpeggio", "Slide up", "Slide down", "Slide to note",
+		"Vibrato", "Slide to note and volume slide", "Vibrato and volume slide", "Tremolo", 
+		"undefined", "Set sample offset", "Volume slide", "Position jump",
+		"Set volume", "Pattern break", "undefined", "Set speed",
+		
+		// E command. Subcommand + 16
+		"Set filter on/off", "Fineslide up", "Fineslide down", "Set glissando on/off",
+		"Set vibrato waveform", "Set finetune value", "Loop pattern", "Set tremolo waveform",
+		"Unused", "Retrigger sample", "Fine volume slide up", "Fine volume slide down",
+		"Cut sample", "Delay sample", "Delay pattern", "Invert loop"
+		];
+						 
 /// Custom error enum
 #[derive(Debug)]
 pub enum PTMFError {
@@ -826,5 +840,175 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 		}		
 	}
 
-	return Ok(module)
+	Ok(module)
+}
+
+/// Encode one Channel data into p61 format 
+fn encode_p61_channel(channel: &Channel) -> u32 {
+
+	let mut note_index = 0;
+	for i in 0..PERIODS.len() {
+		if PERIODS[i] == channel.period {
+			note_index = (i - 11) as u32;
+			break;
+		}
+	}
+	
+	let note_index = (note_index & 0b111111) as u32; 
+	let sample_number = (channel.sample_number & 0b11111) as u32;
+	let mut effect = (channel.effect & 0b111111111111) as u32;
+	let cmd = (effect & 0xf00) >> 8 as u8;
+	let params = effect & 0xff;
+	let param1 = (effect & 0xf0) >> 4;
+	let param2 = effect & 0xf;
+	
+	// Some effects must be rewritten
+	if cmd == 0xE {
+		// E commands are special, handled below
+		match param1 {
+			0 => effect = (effect & 0xff) | ((param2 & 1) * 2),
+			1 | 2 | 9 | 0xA | 0xB | 0xD | 0xE if param2 == 0 => effect = 0, // No effect if empty paramters,
+			3 | 4 | 5 | 6 | 7 | 8 | 0xF => (),
+			0xC if param2 == 0 => effect = 0xC00, // Replace with empty volume
+			_ => ()
+		}
+		
+	} else {
+		match cmd {
+			0 if params != 0 => effect |= 0x800,	// Effect 0 replaced with 8
+			1 | 2 | 0xA if params == 0 => effect = 0, // No effect if parameters empty
+			3 | 4 | 7 | 9 | 0xF => (),
+			5 if params == 0 => effect = 0x300,
+			6 if params == 0 => effect = 0x400,
+			5 | 6 | 0xA if params != 0 && param1 == 0 => effect &= 0xf0f,
+			5 | 6 | 0xA if params != 0 && param1 != 0 => {
+				let p = 0 - param2;
+				effect = (effect & 0xf00) | (p & 0xff);
+			},
+			8 => effect = 0xe80 | param2, // Effect 8 replaced with E8
+			0xB => (), // TODO Handle break
+			0xC if params > 64 => effect = 0xC40,
+			0xD => (), // TODO Handle jump
+			_ => ()
+		}
+
+	}
+	
+	let p61 = (note_index << 25) | (sample_number << 20) | (effect << 8);
+//	println!("P: {:X} Note: {:b}", p61,p61);
+	p61
+}
+
+
+/// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
+pub fn write_p61(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFError> {
+
+	// TODO 
+	// Magic bytes P61A
+	// Offset to samples
+	// Number of patterns
+	// Number of samples + bits for sample packing
+	// Optional unpacked sample length
+
+	// For each sample
+	// Sample length
+	// Finetune + bit for sample packing
+	// Volume
+	// Repeat start
+	
+	// For each pattern and each channel
+	// Offset to channel data start
+	
+	// Pattern play order
+	// Byte sequence terminated by $ff
+	
+	// Pattern data
+	
+	// Loop through all patterns channel by channel
+	// Encode as The Player, keep track of pattern breaks and pattern jumps
+	
+	let mut encoded_patterns:Vec<u32> = Vec::new();
+	let mut encoded_offsets:Vec<usize> = Vec::new();
+	for pattern_number in 0..module.patterns.len() {
+	
+		// Check for pattern break / pattern jump
+		let mut break_pos = DEFAULT_NUMBER_OF_ROWS_PER_PATTERN;
+		for row_number in 0..break_pos {
+		
+			let mut found_break = false;
+			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+				let effect = module.patterns[pattern_number].rows[row_number].channels[channel_number].effect & 0xf00;
+				if effect == 0xB00 || effect == 0xD00 {
+					println!("E: {:X}", effect);
+					if found_break {
+						// Remove effect
+						module.patterns[pattern_number].rows[row_number].channels[channel_number].effect = 0;
+					} else {
+						found_break = true;
+						break_pos = row_number + 1;
+						println!("Break: {}",break_pos);
+					}
+				}
+			}
+		}
+
+		// Encode
+		for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+			let channel_offset = encoded_patterns.len();
+			encoded_offsets.push(channel_offset);
+			
+			let mut first = true;
+			for row_number in 0..break_pos {
+//				println!("Data: {:?}", pattern_it.rows[row_number].channels[channel_number]);
+				let current = encode_p61_channel(&module.patterns[pattern_number].rows[row_number].channels[channel_number]);
+				if first {
+					// First time only
+					first = false;
+					encoded_patterns.push(current);
+					continue;
+				}
+			
+				// Check if we can add compression info
+				let last_index = encoded_patterns.len()-1;
+				let previous = encoded_patterns[last_index];
+				let has_compression_info = (0x80000000 & previous) > 0;
+				let compression_num_empty_row = (previous & 0b11000000) == 0;
+				let compression_num_repeat_row = (previous & 0b11000000) == 0b10000000;
+				let same_row = (current & 0x7fffffff) == (previous & 0x7fffffff);
+				let is_empty = current == 0;
+				
+				match (has_compression_info,compression_num_empty_row,compression_num_repeat_row,same_row,is_empty) {
+					(false,_,false,_,true) => {
+						encoded_patterns[last_index] |= 0x80000000 | 0b00000001;
+						println!("f t f f t");
+					},
+					(true,true,false,_,true) => {
+						encoded_patterns[last_index] = (previous & 0xffffff00) | ((previous + 1) & 0xff);
+						println!("t t f f t");
+					},
+					(false,_,false,true,false) => {
+						encoded_patterns[last_index] |= 0x80000000 | 0b10000001;
+						println!("f f t t f");
+					},
+					(true,false,true,true,false) => {
+						encoded_patterns[last_index] = (previous & 0xffffff00) | ((previous + 1) & 0xff);
+						println!("t f t t f");
+					},
+					_ => {
+						encoded_patterns.push(current);
+						println!("L: {} P: {:X} {:b} C: {:X} {:b}",last_index,encoded_patterns[last_index],encoded_patterns[last_index],current,current);
+					}
+				}
+								
+			} // for row...
+		}	// for channel...
+		break;
+	} // pattern
+
+	println!("Offsets: {:?}",encoded_offsets);
+	println!("Data: {:?}",encoded_patterns);
+
+	// Sample data
+	
+	Ok(())
 }
