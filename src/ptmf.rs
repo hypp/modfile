@@ -347,7 +347,7 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFErr
 }
 
 /// Read a 31 sample Amiga ProTracker mod-file
-pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
+pub fn read_mod(reader: &mut Read, ignore_file_size_check: bool) -> Result<PTModule, PTMFError> {
 	let mut module = PTModule::new();
 
 	// First read 20 bytes songname
@@ -391,7 +391,7 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	num_patterns += 1;
 	for _ in 0..num_patterns {
 		let mut pattern = Pattern::new();
-		for mut row in &mut pattern.rows {
+		for row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
 				try!(read_all(reader,&mut data));
@@ -414,19 +414,21 @@ pub fn read_mod(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	}
 	
 	// Now we have read all data. 
-	// Sanity check that the reader is empty
-	let mut data = [0u8; 1];
-	match reader.read(&mut data) {
-		Ok(n) if n == data.len() => return Err(PTMFError::Parse(format!("Unread data left in file"))),
-		_ => ()
-	};
+	if !ignore_file_size_check {
+		// Sanity check that the reader is empty
+		let mut data = [0u8; 1];
+		match reader.read(&mut data) {
+			Ok(n) if n == data.len() => return Err(PTMFError::Parse(format!("Unread data left in file"))),
+			_ => ()
+		};
+	}
 
 	Ok(module)
 }
 
 fn decode_p61_effect(effect_type:u8, params: u8) -> (bool, u16) {
 
-	let mut effect:u16;
+	let effect:u16;
 	let mut eop = false;
 
 	let effect_type = effect_type & 0x0f;
@@ -571,7 +573,7 @@ fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize
 			}
 		} else if ctype == 0b01000000 || ctype == 0b11000000 {
 			// Copy previous data from offset
-			let mut copy_offset:u16;
+			let copy_offset:u16;
 			
 			if is_empty {
 				// Special handling when empty ... WTF
