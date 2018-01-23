@@ -13,6 +13,7 @@ Released under MIT License, please see the file LICENSE.
 Usage
 See the examples dir, but basically it is:
 
+```
 ...
 extern crate modfile;
 use modfile::ptmf;
@@ -26,9 +27,13 @@ let mut module_p61 = ptmf::read_p61(&mut reader_p61).unwrap();
 let mut writer = BufWriter::new(&new_file);
 ptmf::write_mod(&mut writer, &mut module).unwrap();
 ...
+```
 
 And put this in your Cargo.toml:
+```
 ...
 [dependencies.modfile]
 git = "https://github.com/hypp/modfile"
 ...
+```
+
