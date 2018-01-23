@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/hypp/modfile.svg?branch=master)](https://travis-ci.org/hypp/modfile)
+
 About
 This is a Rust crate for reading and writing Amiga ProTracker MOD-files.
 It can also read (some?) MOD-files packed with The Player 6.1 , including 
