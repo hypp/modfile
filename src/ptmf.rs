@@ -9,7 +9,11 @@ const DEFAULT_NUMBER_OF_SAMPLES:usize = 31;
 const DEFAULT_NUMBER_OF_ROWS_PER_PATTERN:usize = 64;
 const DEFAULT_NUMBER_OF_CHANNELS_PER_ROW:usize = 4;
 const MAGIC_MK:[u8; 4] =['M' as u8, '.' as u8, 'K' as u8, '.' as u8];
+const MAGIC_MK99:[u8; 4] =['M' as u8, '!' as u8, 'K' as u8, '!' as u8];
 const MAGIC_FLT4:[u8; 4] =['F' as u8, 'L' as u8, 'T' as u8, '4' as u8];
+const MAGIC_4CHN:[u8; 4] =['4' as u8, 'C' as u8, 'H' as u8, 'N' as u8];
+const MAGIC_6CHN:[u8; 4] =['6' as u8, 'C' as u8, 'H' as u8, 'N' as u8];
+const MAGIC_8CHN:[u8; 4] =['8' as u8, 'C' as u8, 'H' as u8, 'N' as u8];
 
 ///
 /// Periods from http://greg-kennedy.com/tracker/modformat.html
@@ -117,9 +121,9 @@ pub struct Row {
 }
 
 impl Row {
-	pub fn new() -> Row {
+	pub fn new(num_channels: usize) -> Row {
 		let mut row = Row{channels: Vec::new()};
-		for _ in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+		for _ in 0..num_channels {
 			row.channels.push(Channel::new());
 		}
 		
@@ -135,11 +139,11 @@ pub struct Pattern {
 }
 
 impl Pattern {
-	pub fn new() -> Pattern {
+	pub fn new(num_rows:usize,num_channels:usize) -> Pattern {
 		let mut p = Pattern{rows: Vec::new()};
 
-		for _ in 0..DEFAULT_NUMBER_OF_ROWS_PER_PATTERN {
-			p.rows.push(Row::new());
+		for _ in 0..num_rows {
+			p.rows.push(Row::new(num_channels));
 		}
 
 		p
@@ -379,10 +383,23 @@ pub fn read_mod(reader: &mut Read, ignore_file_size_check: bool) -> Result<PTMod
 	// M.K.
 	try!(read_all(reader,&mut module.mk));
 	if module.mk != MAGIC_MK &&
-		module.mk != MAGIC_FLT4 {
+		module.mk != MAGIC_MK99 &&
+		module.mk != MAGIC_FLT4 &&
+		module.mk != MAGIC_4CHN &&
+		module.mk != MAGIC_6CHN &&
+		module.mk != MAGIC_8CHN {
 		return Err(PTMFError::Parse(format!("Unknown format {:?}", module.mk)));
 	}
-	
+	let num_channels = 
+		if  module.mk == MAGIC_6CHN {
+			6
+		} else if  module.mk == MAGIC_8CHN {
+			8
+		} else {
+			4
+		}
+	;
+
 	// Read all patterns
 	let mut num_patterns = 0;
 	for n in module.positions.data.iter() {
@@ -390,7 +407,7 @@ pub fn read_mod(reader: &mut Read, ignore_file_size_check: bool) -> Result<PTMod
 	}
 	num_patterns += 1;
 	for _ in 0..num_patterns {
-		let mut pattern = Pattern::new();
+		let mut pattern = Pattern::new(DEFAULT_NUMBER_OF_ROWS_PER_PATTERN,num_channels);
 		for row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
@@ -761,7 +778,7 @@ pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
 	
 	let mut pattern_offsets:Vec<usize> = Vec::new();
 	for _ in 0..num_patterns {
-		module.patterns.push(Pattern::new());
+		module.patterns.push(Pattern::new(DEFAULT_NUMBER_OF_ROWS_PER_PATTERN, DEFAULT_NUMBER_OF_CHANNELS_PER_ROW));
 		for _ in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
 			let offset = (((data[pos] as u16) << 8) | data[pos+1] as u16) as usize;
 			pattern_offsets.push(offset);
