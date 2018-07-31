@@ -1,4 +1,4 @@
 [package]
 name = "modfile"
-version = "1.3.1"
+version = "1.3.2"
 authors = ["Mathias Olsson <hypp74@gmail.com>"]

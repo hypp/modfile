@@ -49,7 +49,7 @@ pub static EFFECT_NAMES: &'static [&'static str] = &[
 		// E command. Subcommand + 16
 		"Set filter on/off", "Fineslide up", "Fineslide down", "Set glissando on/off",
 		"Set vibrato waveform", "Set finetune value", "Loop pattern", "Set tremolo waveform",
-		"Unused", "Retrigger sample", "Fine volume slide up", "Fine volume slide down",
+		"Sync effect to music", "Retrigger sample", "Fine volume slide up", "Fine volume slide down",
 		"Cut sample", "Delay sample", "Delay pattern", "Invert loop"
 		];
 						 
