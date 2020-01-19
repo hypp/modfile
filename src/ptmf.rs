@@ -95,8 +95,7 @@ impl SampleInfo {
 }
 
 /// Data for one channel
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Channel {
 	/// The period value used on Amiga for playback. Represents the frequency.
 	pub period: u16, // Really u12
@@ -114,7 +113,7 @@ impl Channel {
 
 /// A single row in a Pattern.
 /// Normally there are 4 channels per Row.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Row {
 	/// Data for each Channel
 	pub channels: Vec<Channel>
@@ -132,7 +131,7 @@ impl Row {
 }
 
 /// A Pattern with multiple Rows and Channels
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pattern {
 	/// Data for each Channel
 	pub rows: Vec<Row>
