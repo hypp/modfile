@@ -195,11 +195,11 @@ impl PTModule {
 	}
 }
 
-fn read_all(reader: &mut Read, data: &mut [u8]) -> io::Result<usize> {
+fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
 	let mut pos = 0;
 	while pos < data.len() {
 		let slice = &mut data[pos..];
-		let n = try!(reader.read(slice));
+		let n = reader.read(slice)?;
 		if n == 0 {
 			return Err(io::Error::new(io::ErrorKind::Other, "0 was returned from read"))
 		}
@@ -209,15 +209,15 @@ fn read_all(reader: &mut Read, data: &mut [u8]) -> io::Result<usize> {
 	Ok(pos)
 }
 
-fn write_all(writer: &mut Write, data: &[u8]) -> io::Result<()> {
-	let n = try!{writer.write_all(&data)};
+fn write_all(writer: &mut dyn Write, data: &[u8]) -> io::Result<()> {
+	let n = {writer.write_all(&data)}?;
 	
 	Ok(n)
 }
 
-fn read_0_padded_string(reader: &mut Read, len: usize) -> Result<String, io::Error> {
+fn read_0_padded_string(reader: &mut dyn Read, len: usize) -> Result<String, io::Error> {
 	let mut data = vec![0u8; len];
-	try!(read_all(reader,&mut data));
+	read_all(reader,&mut data)?;
 	let mut str = String::new();
 	for byte in data {
 		str.push(byte as char);
@@ -226,7 +226,7 @@ fn read_0_padded_string(reader: &mut Read, len: usize) -> Result<String, io::Err
 	Ok(str)
 }
 
-fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) -> io::Result<()> {
+fn write_0_padded_string(writer: &mut dyn Write, str: &String, len: usize) -> io::Result<()> {
 	let mut data = vec![0u8; len];
 	let str_buf = str.as_bytes();
 	let m = cmp::min(data.len(),str_buf.len());
@@ -234,14 +234,14 @@ fn write_0_padded_string(writer: &mut Write, str: &String, len: usize) -> io::Re
 		data[i] = str_buf[i];
 	}
 	
-	let n = try!(write_all(writer, &data));
+	let n = write_all(writer, &data)?;
 	
 	Ok(n)
 }
 
-fn read_big_endian_u16(reader: &mut Read) -> Result<u16, io::Error> {
+fn read_big_endian_u16(reader: &mut dyn Read) -> Result<u16, io::Error> {
 	let mut data_arr = [0u8; 2];
-	try!(read_all(reader,&mut data_arr));
+	read_all(reader,&mut data_arr)?;
 
 	let mut data:u16 = 0;
 	
@@ -252,70 +252,70 @@ fn read_big_endian_u16(reader: &mut Read) -> Result<u16, io::Error> {
 	Ok(data)
 }
 
-fn write_big_endian_u16(writer: &mut Write, val: u16)  -> io::Result<()> {
+fn write_big_endian_u16(writer: &mut dyn Write, val: u16)  -> io::Result<()> {
 	let mut data = [0u8; 2];
 	data[0] = (val >> 8) as u8;
 	data[1] = (val & 0xff) as u8;
 	
-	let n = try!(write_all(writer, &data));
+	let n = write_all(writer, &data)?;
 	
 	Ok(n)
 }
 
-fn read_u8(reader: &mut Read) -> Result<u8, io::Error> {
+fn read_u8(reader: &mut dyn Read) -> Result<u8, io::Error> {
 	let mut data = [0u8; 1];
 	
-	try!(read_all(reader, &mut data));
+	read_all(reader, &mut data)?;
 	
 	Ok(data[0])
 }
 
 
-fn write_u8(writer: &mut Write, val: u8)  -> io::Result<()> {
+fn write_u8(writer: &mut dyn Write, val: u8)  -> io::Result<()> {
 	let mut data = [0u8; 1];
 	data[0] = val;
 	
-	let n = try!(write_all(writer, &data));
+	let n = write_all(writer, &data)?;
 	
 	Ok(n)
 }
 
 /// Write a 31 sample Amiga ProTracker mod-file
-pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFError> {
+pub fn write_mod(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),PTMFError> {
 
 	// First write songname, 20 bytes, pad with 0
-	try!(write_0_padded_string(writer,&module.name,20));
+	write_0_padded_string(writer,&module.name,20)?;
 	// Then write all 32 samples
 	// TODO Handle the case when the vector has less than 31 samples
 	let mut num_samples = 0;
 	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
 		let ref si = module.sample_info[i];
 		// Sample name
-		try!(write_0_padded_string(writer, &si.name, 22));
+		write_0_padded_string(writer, &si.name, 22)?;
 		// Sample length
-		try!(write_big_endian_u16(writer, si.length));
+		write_big_endian_u16(writer, si.length)?;
 		if si.length > 0 {
 			num_samples += 1;
 		}
 		// Finetune
-		try!(write_u8(writer, si.finetune));
+		write_u8(writer, si.finetune)?;
 		// Volume
-		try!(write_u8(writer, si.volume));
+		write_u8(writer, si.volume)?;
 		// Repeat start
-		try!(write_big_endian_u16(writer, si.repeat_start));
+		write_big_endian_u16(writer, si.repeat_start)?;
 		// Repeat length
-		try!(write_big_endian_u16(writer, si.repeat_length));
+		write_big_endian_u16(writer, si.repeat_length)?;
 	}
 	
 	let num_samples = num_samples;
 	// Songlength
-	try!(write_u8(writer, module.length));
+	write_u8(writer, module.length)?;
 	// nt_restart
-	try!(write_u8(writer, module.nt_restart));
+	write_u8(writer, module.nt_restart)?;
 	// Song positions
-	try!(write_all(writer,&module.positions.data));
+	write_all(writer,&module.positions.data)?;
 	// M.K.
-	try!(write_all(writer,&module.mk));
+	write_all(writer,&module.mk)?;
 	
 	// All patterns
 	for pattern_it in module.patterns.iter() {
@@ -330,7 +330,7 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFErr
 				data[2] = ((channel_it.sample_number & 0x0f) << 4) | ((channel_it.effect & 0xf00) >> 8) as u8;
 				data[3] = (channel_it.effect & 0xff) as u8;
 				
-				try!(write_all(writer,&data));
+				write_all(writer,&data)?;
 			}
 		}
 	}
@@ -338,7 +338,7 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFErr
 	// And finally all samples
 	let mut num_written = 0;
 	for sample_it in module.sample_info.iter().filter(|si| si.length > 0) {
-		try!(write_all(writer,&sample_it.data));
+		write_all(writer,&sample_it.data)?;
 		num_written += 1;
 	}
 	
@@ -350,37 +350,37 @@ pub fn write_mod(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFErr
 }
 
 /// Read a 31 sample Amiga ProTracker mod-file
-pub fn read_mod(reader: &mut Read, ignore_file_size_check: bool) -> Result<PTModule, PTMFError> {
+pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<PTModule, PTMFError> {
 	let mut module = PTModule::new();
 
 	// First read 20 bytes songname
-	module.name = try!(read_0_padded_string(reader, 20));
+	module.name = read_0_padded_string(reader, 20)?;
 
 	// Read all sample info
 	// TODO Handle 15 sample files
 	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
 		let si = &mut module.sample_info[i];
 		// Sample name
-		si.name = try!(read_0_padded_string(reader, 22));
-		si.length = try!(read_big_endian_u16(reader));
+		si.name = read_0_padded_string(reader, 22)?;
+		si.length = read_big_endian_u16(reader)?;
 		// Finetune
-		si.finetune = try!(read_u8(reader));
+		si.finetune = read_u8(reader)?;
 		// Volume
-		si.volume = try!(read_u8(reader));
+		si.volume = read_u8(reader)?;
 		// Repeat start
-		si.repeat_start = try!(read_big_endian_u16(reader));
+		si.repeat_start = read_big_endian_u16(reader)?;
 		// Repeat length
-		si.repeat_length = try!(read_big_endian_u16(reader));
+		si.repeat_length = read_big_endian_u16(reader)?;
 	}
 	
 	// Songlength
-	module.length = try!(read_u8(reader));
+	module.length = read_u8(reader)?;
 	// nt_restart
-	module.nt_restart = try!(read_u8(reader));
+	module.nt_restart = read_u8(reader)?;
 	// Song positions
-	try!(read_all(reader,&mut module.positions.data));
+	read_all(reader,&mut module.positions.data)?;
 	// M.K.
-	try!(read_all(reader,&mut module.mk));
+	read_all(reader,&mut module.mk)?;
 	if module.mk != MAGIC_MK &&
 		module.mk != MAGIC_MK99 &&
 		module.mk != MAGIC_FLT4 &&
@@ -410,7 +410,7 @@ pub fn read_mod(reader: &mut Read, ignore_file_size_check: bool) -> Result<PTMod
 		for row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
-				try!(read_all(reader,&mut data));
+				read_all(reader,&mut data)?;
 				channel.sample_number = (data[0] & 0xf0) | ((data[2] & 0xf0) >> 4);
 				channel.period = (((data[0] & 0x0f) as u16) << 8) | (data[1] as u16);
 				channel.effect = (((data[2] & 0x0f) as u16) << 8) | (data[3] as u16);
@@ -424,7 +424,7 @@ pub fn read_mod(reader: &mut Read, ignore_file_size_check: bool) -> Result<PTMod
 		if si.length > 0 {
 			let length_in_bytes = si.length * 2;
 			let mut data = vec![0u8; length_in_bytes as usize];
-			try!(read_all(reader,&mut data));
+			read_all(reader,&mut data)?;
 			si.data = data;
 		}
 	}
@@ -637,14 +637,14 @@ fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize
 }
 
 /// Read an Amiga ProTracker file packed with The Player 6.1
-pub fn read_p61(reader: &mut Read) -> Result<PTModule, PTMFError> {
+pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	let mut module = PTModule::new();
 	
 	// Read the entire file to a Vec<u8>
 	// since the format uses a lot of offsets
 	// back and forth in the file.
 	let mut data:Vec<u8> = Vec::new();
-	let data_size = try!(reader.read_to_end(&mut data));
+	let data_size = reader.read_to_end(&mut data)?;
 	if data.len() != data_size {
 		return Err(PTMFError::Parse(format!("Failed to read all bytes {} {}", data.len(), data_size)));	
 	}
@@ -919,7 +919,7 @@ fn encode_p61_channel(channel: &Channel) -> u32 {
 
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
-pub fn write_p61(writer: &mut Write, module: &mut PTModule) -> Result<(),PTMFError> {
+pub fn write_p61(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),PTMFError> {
 
 	// TODO 
 	// Magic bytes P61A
