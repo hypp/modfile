@@ -4,6 +4,12 @@ use std::fmt;
 use std::cmp;
 use std::io;
 use std::num::Wrapping;
+use serde::{Serialize, Deserialize};
+
+
+use serde_big_array::big_array;
+
+big_array! { BigArray; }
 
 const DEFAULT_NUMBER_OF_SAMPLES:usize = 31;
 const DEFAULT_NUMBER_OF_ROWS_PER_PATTERN:usize = 64;
@@ -69,7 +75,7 @@ impl From<io::Error> for PTMFError {
 }
 
 /// Info about each sample
-#[derive(Debug)]
+#[derive(Debug,Deserialize)]
 pub struct SampleInfo {
 	/// Name of sample, 22 characters
 	pub name: String, // [char; 22],
@@ -95,7 +101,7 @@ impl SampleInfo {
 }
 
 /// Data for one channel
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Channel {
 	/// The period value used on Amiga for playback. Represents the frequency.
 	pub period: u16, // Really u12
@@ -113,7 +119,7 @@ impl Channel {
 
 /// A single row in a Pattern.
 /// Normally there are 4 channels per Row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Row {
 	/// Data for each Channel
 	pub channels: Vec<Channel>
@@ -131,7 +137,7 @@ impl Row {
 }
 
 /// A Pattern with multiple Rows and Channels
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Pattern {
 	/// Data for each Channel
 	pub rows: Vec<Row>
@@ -150,8 +156,10 @@ impl Pattern {
 }
 
 /// The order in which to play Patterns
+#[derive(Deserialize)]
 pub struct Positions {
 	/// The order in which to play Patterns
+	#[serde(with = "BigArray")]
 	pub data: [u8; 128]
 }
 
@@ -163,7 +171,7 @@ impl fmt::Debug for Positions {
 
 /// A complete ProTracker module,
 /// including samples, descriptions and patterns
-#[derive(Debug)]
+#[derive(Debug,Deserialize)]
 pub struct PTModule {
 	/// Songname 20 characters
 	pub name: String, // [char; 20],
