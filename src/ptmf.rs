@@ -201,6 +201,104 @@ impl PTModule {
 		
 		ptmod
 	}
+
+	pub fn find_unused_samples(&self) -> Vec<u8> {
+		let mut unused:Vec<u8> = Vec::new();
+		let mut used = [0u8;32];
+	
+		// Find all used samples
+		for pattern_no in 0..self.patterns.len() {
+			let ref pattern = self.patterns[pattern_no];
+			for row_no in 0..pattern.rows.len() {
+				let ref row = pattern.rows[row_no];
+				for channel_no in 0..row.channels.len() {
+					let ref channel = row.channels[channel_no];
+					let number = channel.sample_number as usize;
+					if number > 0 {
+						if number > 31 {
+							println!("Error: Invalid sample number in Pattern '{}' Row '{}' Channel '{}' Sample number '{}'",pattern_no,row_no,channel_no,number);
+						} else {
+							used[number] = 1;
+						}
+					}				
+				}
+			}
+		}
+	
+		// Find all unused samples
+		for i in 1..self.sample_info.len()+1 {
+			if used[i] == 0 {
+				unused.push(i as u8);
+			}
+		}
+		
+		unused
+	}
+	
+	pub fn remove_unused_samples(&mut self) {
+		let mut unused = self.find_unused_samples();
+		// MUST remove highest sample first
+		unused.sort();
+		unused.reverse();
+	
+		for i in unused {
+			let index = i as usize - 1;
+			
+			// Remove sample info and put it last
+			let mut si = self.sample_info.remove(index);
+					
+			si.length = 0;
+			si.repeat_start = 0;
+			si.repeat_length = 0;
+			si.data.clear();
+			self.sample_info.push(si);
+		
+			// Rewrite instrument references
+			// TODO optimize this
+			for pattern in &mut self.patterns {
+				for row in &mut pattern.rows {
+					for channel in &mut row.channels {
+						let number = channel.sample_number;
+						if number > i {
+							channel.sample_number -= 1;
+						}				
+					}
+				}
+			}
+		}
+	}
+
+	pub fn find_unused_patterns(&self) -> Vec<u8> {
+		let mut unused:Vec<u8> = Vec::new();
+		let positions = &self.positions.data[0..self.length as usize];
+		let num_patterns = self.patterns.len();
+		for i in 0..num_patterns as u8 {
+			if !positions.contains(&i) {
+				unused.push(i);
+			}
+		}
+	
+		unused
+	}
+
+	pub fn remove_unused_patterns(&mut self) {
+		let mut unused = self.find_unused_patterns();
+		unused.reverse();
+		
+		// MUST Remove highest pattern first
+		for i in unused {
+			// Remove pattern
+			self.patterns.remove(i as usize);
+		
+			// Adjust play positions
+			for j in 0..self.length {
+				let j = j as usize;
+				if self.positions.data[j] > i {
+					self.positions.data[j] -= 1;
+				}
+			}
+		}
+	}	
 }
 
 fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
