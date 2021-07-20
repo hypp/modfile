@@ -298,7 +298,53 @@ impl PTModule {
 				}
 			}
 		}
-	}	
+	}
+
+	pub fn find_duplicate_patterns(&self) -> Vec<(u8,u8)> {
+		let mut duplicate:Vec<(u8,u8)> = Vec::new();
+
+		let num_patterns = self.patterns.len();
+		for i in 0..num_patterns {
+			let current_pattern = &self.patterns[i];
+			for j in i+1..num_patterns {
+				let next_pattern = &self.patterns[j];
+				if current_pattern == next_pattern {
+					duplicate.push((i as u8,j as u8));
+				} 
+			}
+		}
+
+		duplicate
+	}
+
+	pub fn remove_duplicate_patterns(&mut self) {
+		let duplicates = self.find_duplicate_patterns();
+		let mut removed:Vec<u8> = Vec::new();
+
+		for pair in duplicates {
+			let (src, dst) = pair;
+
+			// Adjust play positions
+			for i in 0..self.length as usize {
+				if self.positions.data[i] == dst {
+					self.positions.data[i] = src;
+				}
+			}
+
+
+			if !removed.contains(&dst) {
+				removed.push(dst);
+			}
+		}
+
+		// Must remove highest pattern first
+		removed.sort();
+		removed.reverse();
+
+		for idx in removed {
+			self.patterns.remove(idx as usize);
+		}
+	}
 }
 
 fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
