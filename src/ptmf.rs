@@ -433,7 +433,7 @@ fn write_u8(writer: &mut dyn Write, val: u8)  -> io::Result<()> {
 }
 
 /// Write a 31 sample Amiga ProTracker mod-file
-pub fn write_mod(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),PTMFError> {
+pub fn write_mod(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
 
 	// First write songname, 20 bytes, pad with 0
 	write_0_padded_string(writer,&module.name,20)?;
