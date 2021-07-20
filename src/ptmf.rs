@@ -1069,9 +1069,260 @@ fn encode_p61_channel(channel: &Channel) -> u32 {
 	p61
 }
 
+/// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
+pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
+
+	let mut workmodule = module.clone();
+
+	// Prepare all data first
+	workmodule.remove_unused_samples();
+	workmodule.remove_duplicate_patterns();
+	workmodule.remove_unused_patterns();
+
+
+
+
+	// Then we write it
+
+
+	Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+	use std::fs::File;
+	use std::io::BufWriter;
+	use std::io::BufReader;
+
+	fn load_module(infilename:String) -> Result<PTModule,()> {
+		let file = match File::open(&infilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+		
+		let mut reader = BufReader::new(&file);
+		let module = match read_mod(&mut reader, true) {
+			Ok(module) => module,
+			Err(e) => {
+				println!("Failed to parse file: '{}' Error: '{:?}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		// Close file
+		drop(file);
+		Ok(module)
+	}
+	
+    #[test]
+	fn test_find_duplicate_patterns() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "duplicate_patterns.mod");
+		let module = load_module(infilename)?;
+
+		let duplicates = module.find_duplicate_patterns();
+		assert!(duplicates.len() > 0);
+		assert!(duplicates.len() == 4467);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_duplicate_patterns() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "duplicate_patterns.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_duplicate_patterns();
+		assert!(module.patterns.len() == 4);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_patterns.mod");
+		let file = match File::create(&outfilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
+				return Err(())
+			}
+		};
+
+		let mut writer = BufWriter::new(&file);		
+		match write_mod(&mut writer,&mut module) {
+			Ok(_) => (),
+			Err(e) => {
+				println!("Failed to write module {}. Error: '{:?}'", outfilename, e);
+			}
+		}
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_all_used() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "all_used_samples.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 0);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_no_used() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "no_used_samples.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 31);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_1() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 1);
+		assert!(unused[0] == 1);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_2() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_2.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 1);
+		assert!(unused[0] == 2);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_3() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_3.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 1);
+		assert!(unused[0] == 3);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_1d() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1d.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 1);
+		assert!(unused[0] == 0x1d);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_1e() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1e.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 1);
+		assert!(unused[0] == 0x1e);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_unused_samples_1f() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1f.mod");
+		let module = load_module(infilename)?;
+
+		let unused = module.find_unused_samples();
+		assert!(unused.len() == 1);
+		assert!(unused[0] == 0x1f);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_unused_samples_all_used() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "all_used_samples.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_unused_samples();
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 31);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_unused_samples_no_used() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "no_used_samples.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_unused_samples();
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 0);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_unused_samples_1() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_unused_samples();
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 30);
+
+		Ok(())
+	}
+
+}
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
-pub fn write_p61(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),PTMFError> {
+pub fn qqqwrite_p61(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),PTMFError> {
 
 	// TODO 
 	// Magic bytes P61A
