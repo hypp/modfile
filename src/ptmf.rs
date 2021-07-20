@@ -282,22 +282,26 @@ impl PTModule {
 		unused
 	}
 
+	fn remove_pattern(&mut self, idx:u8) {
+		// Remove pattern
+		self.patterns.remove(idx as usize);
+	
+		// Adjust play positions
+		for j in 0..self.positions.data.len() {
+			let j = j as usize;
+			if self.positions.data[j] > idx {
+				self.positions.data[j] -= 1;
+			}
+		}
+	}
+
 	pub fn remove_unused_patterns(&mut self) {
 		let mut unused = self.find_unused_patterns();
 		unused.reverse();
 		
 		// MUST Remove highest pattern first
 		for i in unused {
-			// Remove pattern
-			self.patterns.remove(i as usize);
-		
-			// Adjust play positions
-			for j in 0..self.length {
-				let j = j as usize;
-				if self.positions.data[j] > i {
-					self.positions.data[j] -= 1;
-				}
-			}
+			self.remove_pattern(i);
 		}
 	}
 
@@ -326,12 +330,11 @@ impl PTModule {
 			let (src, dst) = pair;
 
 			// Adjust play positions
-			for i in 0..self.length as usize {
+			for i in 0..self.positions.data.len() {
 				if self.positions.data[i] == dst {
 					self.positions.data[i] = src;
 				}
 			}
-
 
 			if !removed.contains(&dst) {
 				removed.push(dst);
@@ -343,8 +346,70 @@ impl PTModule {
 		removed.reverse();
 
 		for idx in removed {
-			self.patterns.remove(idx as usize);
+			self.remove_pattern(idx);
 		}
+	}
+
+	pub fn find_duplicate_samples(&self) -> Vec<(u8,u8)> {
+		let mut duplicate:Vec<(u8,u8)> = Vec::new();
+
+		for i in 0..self.sample_info.len() {
+			let current_sample = &self.sample_info[i];
+			for j in i+1..self.sample_info.len() {
+				let next_sample = &self.sample_info[j];
+				// We only compare some of the fields
+				if current_sample.data == next_sample.data &&
+					current_sample.length == next_sample.length &&
+					current_sample.repeat_start == next_sample.repeat_start &&
+					current_sample.repeat_length == next_sample.repeat_length &&
+					current_sample.volume == next_sample.volume &&
+					current_sample.finetune == next_sample.finetune {
+					duplicate.push((i as u8,j as u8));
+				}
+			}
+		}
+
+		duplicate
+	}
+
+	pub fn remove_duplicate_samples(&mut self) {
+		let duplicates = self.find_duplicate_samples();
+		let mut removed:Vec<u8> = Vec::new();
+
+		for pair in duplicates {
+			let (src, dst) = pair;
+			// sample numbers in mod starts at 1
+			// 0 is used for no sample
+			let src1 = src+1;
+			let dst1 = dst+1;
+
+			// Rewrite instrument references
+			// TODO optimize this
+			for pattern in &mut self.patterns {
+				for row in &mut pattern.rows {
+					for channel in &mut row.channels {
+						if channel.sample_number == dst1 {
+							channel.sample_number = src1;
+						}				
+					}
+				}
+			}
+
+			if !removed.contains(&dst) {
+				removed.push(dst);
+			}
+		}
+
+		// Must remove highest sample first
+		removed.sort();
+		removed.reverse();
+
+		for idx in removed {
+			// Remove sample info and put an empty one last
+			self.sample_info.remove(idx as usize);
+			self.sample_info.push(SampleInfo::new());
+		}
+
 	}
 }
 
@@ -1120,7 +1185,53 @@ mod tests {
 		drop(file);
 		Ok(module)
 	}
+
+	fn save_module(outfilename:String, module:PTModule) -> Result<(),()> {
+		let file = match File::create(&outfilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
+				return Err(())
+			}
+		};
+
+		let mut writer = BufWriter::new(&file);		
+		match write_mod(&mut writer,&module) {
+			Ok(_) => Ok(()),
+			Err(e) => {
+				println!("Failed to write module {}. Error: '{:?}'", outfilename, e);
+				return Err(());
+			}
+		}
+	}
 	
+    #[test]
+    fn test_write_p61() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/{}",basedir, "incy-wincy.mod");
+		let mut module = load_module(infilename)?;
+
+		let outfilename = format!("{}/{}",basedir, "P61.test_write_p61.mod");
+		let file = match File::create(&outfilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
+				return Err(())
+			}
+		};
+
+		let mut writer = BufWriter::new(&file);
+		let _res = match write_p61(&mut writer,&mut module) {
+			Ok(e) => e,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
+				return Err(())
+			}
+		};
+		Ok(())
+    }
+
     #[test]
 	fn test_find_duplicate_patterns() -> Result<(),()> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
@@ -1146,21 +1257,7 @@ mod tests {
 		assert!(module.patterns.len() == 4);
 
 		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_patterns.mod");
-		let file = match File::create(&outfilename) {
-			Ok(file) => file,
-			Err(e) => {
-				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
-				return Err(())
-			}
-		};
-
-		let mut writer = BufWriter::new(&file);		
-		match write_mod(&mut writer,&mut module) {
-			Ok(_) => (),
-			Err(e) => {
-				println!("Failed to write module {}. Error: '{:?}'", outfilename, e);
-			}
-		}
+		save_module(outfilename,module)?;
 
 		Ok(())
 	}
@@ -1287,6 +1384,9 @@ mod tests {
 		let num_samples = samples.count();
 		assert!(num_samples == 31);
 
+		let outfilename = format!("{}/{}",basedir, "test_remove_unused_samples_all_used.mod");
+		save_module(outfilename,module)?;
+
 		Ok(())
 	}
 
@@ -1302,6 +1402,9 @@ mod tests {
 		let num_samples = samples.count();
 		assert!(num_samples == 0);
 
+		let outfilename = format!("{}/{}",basedir, "test_remove_unused_samples_no_used.mod");
+		save_module(outfilename,module)?;
+
 		Ok(())
 	}
 
@@ -1316,6 +1419,105 @@ mod tests {
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
 		let num_samples = samples.count();
 		assert!(num_samples == 30);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_unused_samples_1.mod");
+		save_module(outfilename,module)?;
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_duplicate_samples_same_sample() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "same_sample.mod");
+		let module = load_module(infilename)?;
+
+		let duplicates = module.find_duplicate_samples();
+		assert!(duplicates.len() > 0);
+		assert!(duplicates.len() == 465);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_duplicate_samples_same_sample_ft() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "same_sample_ft.mod");
+		let module = load_module(infilename)?;
+
+		let duplicates = module.find_duplicate_samples();
+		assert!(duplicates.len() > 0);
+		assert!(duplicates.len() == 353);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_find_duplicate_samples_same_sample_rep() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "same_sample_rep.mod");
+		let module = load_module(infilename)?;
+
+		let duplicates = module.find_duplicate_samples();
+		assert!(duplicates.len() > 0);
+		assert!(duplicates.len() == 406);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_duplicate_samples_same_sample() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "same_sample.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_duplicate_samples();
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 1);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_samples_same_sample.mod");
+		save_module(outfilename,module)?;
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_duplicate_samples_same_sample_ft() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "same_sample_ft.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_duplicate_samples();
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 3);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_samples_same_sample_ft.mod");
+		save_module(outfilename,module)?;
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_remove_duplicate_samples_same_sample_rep() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "same_sample_rep.mod");
+		let mut module = load_module(infilename)?;
+
+		module.remove_duplicate_samples();
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 3);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_samples_same_sample_rep.mod");
+		save_module(outfilename,module)?;
 
 		Ok(())
 	}
