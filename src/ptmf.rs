@@ -246,7 +246,8 @@ impl PTModule {
 			
 			// Remove sample info and put it last
 			let mut si = self.sample_info.remove(index);
-					
+				
+			// TODO this means the name is kept intact, is that what we want?
 			si.length = 0;
 			si.repeat_start = 0;
 			si.repeat_length = 0;
