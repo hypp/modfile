@@ -75,7 +75,7 @@ impl From<io::Error> for PTMFError {
 }
 
 /// Info about each sample
-#[derive(Debug,Serialize,Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct SampleInfo {
 	/// Name of sample, 22 characters
 	pub name: String, // [char; 22],
@@ -101,7 +101,7 @@ impl SampleInfo {
 }
 
 /// Data for one channel
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Channel {
 	/// The period value used on Amiga for playback. Represents the frequency.
 	pub period: u16, // Really u12
@@ -119,7 +119,7 @@ impl Channel {
 
 /// A single row in a Pattern.
 /// Normally there are 4 channels per Row.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Row {
 	/// Data for each Channel
 	pub channels: Vec<Channel>
@@ -137,7 +137,7 @@ impl Row {
 }
 
 /// A Pattern with multiple Rows and Channels
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Pattern {
 	/// Data for each Channel
 	pub rows: Vec<Row>
@@ -156,7 +156,7 @@ impl Pattern {
 }
 
 /// The order in which to play Patterns
-#[derive(Serialize,Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Positions {
 	/// The order in which to play Patterns
 	#[serde(with = "BigArray")]
@@ -171,7 +171,7 @@ impl fmt::Debug for Positions {
 
 /// A complete ProTracker module,
 /// including samples, descriptions and patterns
-#[derive(Debug,Serialize,Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct PTModule {
 	/// Songname 20 characters
 	pub name: String, // [char; 20],
