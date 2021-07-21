@@ -240,16 +240,9 @@ impl PTModule {
 		for i in unused {
 			let index = i as usize - 1;
 			
-			// Remove sample info and put it last
-			let mut si = self.sample_info.remove(index);
+			// Remove sample info
+			self.sample_info.remove(index);
 				
-			// TODO this means the name is kept intact, is that what we want?
-			si.length = 0;
-			si.repeat_start = 0;
-			si.repeat_length = 0;
-			si.data.clear();
-			self.sample_info.push(si);
-		
 			// Rewrite instrument references
 			// TODO optimize this
 			for pattern in &mut self.patterns {
@@ -401,9 +394,8 @@ impl PTModule {
 		removed.reverse();
 
 		for idx in removed {
-			// Remove sample info and put an empty one last
+			// Remove sample info
 			self.sample_info.remove(idx as usize);
-			self.sample_info.push(SampleInfo::new());
 		}
 
 	}
@@ -518,7 +510,6 @@ pub fn write_mod(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		write_big_endian_u16(writer, si.repeat_start)?;
 		// Repeat length
 		write_big_endian_u16(writer, si.repeat_length)?;
-		println!("wrote sample");
 		num_sample_info += 1;
 	}
 	// write extra empty sampleinfo to make it 31
@@ -536,7 +527,6 @@ pub fn write_mod(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		write_big_endian_u16(writer, si.repeat_start)?;
 		// Repeat length
 		write_big_endian_u16(writer, si.repeat_length)?;
-		println!("wrote extra sample");
 		num_sample_info += 1;
 	}
 	if num_sample_info != DEFAULT_NUMBER_OF_SAMPLES {
