@@ -1278,6 +1278,48 @@ mod tests {
 		Ok(())
 	}
 
+	#[test]
+	fn test_write_mod() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+		let infilename = format!("{}/testdata/{}",basedir, "spiderfunk.mod");
+
+		let mut file = match File::open(&infilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		let mut org_data:Vec<u8> = Vec::new();
+		let _data_size = match file.read_to_end(&mut org_data) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to read file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		let module = match read_mod(&mut org_data.as_slice(), true) {
+			Ok(module) => module,
+			Err(e) => {
+				println!("Failed to parse file: '{}' Error: '{:?}'", infilename, e);
+				return Err(())
+			}
+		}; 
+		let mut new_data:Vec<u8> = Vec::new();
+		match write_mod(&mut new_data, &module) {
+			Ok(_) => (),
+			Err(e) => {
+				println!("Failed to write module. Error: '{:?}'", e);
+				return Err(());
+			}
+		};
+
+		assert!(org_data == new_data);
+
+		Ok(())
+	}
 
     #[test]
 	fn test_find_duplicate_patterns() -> Result<(),()> {
