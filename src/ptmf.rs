@@ -191,14 +191,10 @@ pub struct PTModule {
 
 impl PTModule {
 	pub fn new() -> PTModule {
-		let mut ptmod = PTModule{name: String::new(), sample_info: Vec::new(), length:0, 
+		let ptmod = PTModule{name: String::new(), sample_info: Vec::new(), length:0, 
 			nt_restart: 127, positions: Positions{data: [0; 128]}, mk: MAGIC_MK, 
 			patterns: Vec::new() };
 			
-		for _ in 0..DEFAULT_NUMBER_OF_SAMPLES {
-			ptmod.sample_info.push(SampleInfo::new());
-		}
-		
 		ptmod
 	}
 
@@ -503,11 +499,10 @@ pub fn write_mod(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 
 	// First write songname, 20 bytes, pad with 0
 	write_0_padded_string(writer,&module.name,20)?;
-	// Then write all 32 samples
-	// TODO Handle the case when the vector has less than 31 samples
+	// Then write all 31 samples
+	let mut num_sample_info = 0;
 	let mut num_samples = 0;
-	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
-		let ref si = module.sample_info[i];
+	for si in &module.sample_info {
 		// Sample name
 		write_0_padded_string(writer, &si.name, 22)?;
 		// Sample length
@@ -523,6 +518,30 @@ pub fn write_mod(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		write_big_endian_u16(writer, si.repeat_start)?;
 		// Repeat length
 		write_big_endian_u16(writer, si.repeat_length)?;
+		println!("wrote sample");
+		num_sample_info += 1;
+	}
+	// write extra empty sampleinfo to make it 31
+	let si = SampleInfo::new();
+	for _ in 0..DEFAULT_NUMBER_OF_SAMPLES-module.sample_info.len() {
+		// Sample name
+		write_0_padded_string(writer, &si.name, 22)?;
+		// Sample length
+		write_big_endian_u16(writer, si.length)?;
+		// Finetune
+		write_u8(writer, si.finetune)?;
+		// Volume
+		write_u8(writer, si.volume)?;
+		// Repeat start
+		write_big_endian_u16(writer, si.repeat_start)?;
+		// Repeat length
+		write_big_endian_u16(writer, si.repeat_length)?;
+		println!("wrote extra sample");
+		num_sample_info += 1;
+	}
+	if num_sample_info != DEFAULT_NUMBER_OF_SAMPLES {
+		println!("Failed len {} required {} written {}",module.sample_info.len(),DEFAULT_NUMBER_OF_SAMPLES,num_sample_info);
+		return Err(PTMFError::Parse(format!("Error! Wrong number of sample info '{}'", num_sample_info)));
 	}
 	
 	let num_samples = num_samples;
@@ -576,8 +595,8 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 
 	// Read all sample info
 	// TODO Handle 15 sample files
-	for i in 0..DEFAULT_NUMBER_OF_SAMPLES {
-		let si = &mut module.sample_info[i];
+	for _i in 0..DEFAULT_NUMBER_OF_SAMPLES {
+		let mut si = SampleInfo::new();
 		// Sample name
 		si.name = read_0_padded_string(reader, 22)?;
 		si.length = read_big_endian_u16(reader)?;
@@ -589,6 +608,8 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 		si.repeat_start = read_big_endian_u16(reader)?;
 		// Repeat length
 		si.repeat_length = read_big_endian_u16(reader)?;
+
+		module.sample_info.push(si);
 	}
 	
 	// Songlength
