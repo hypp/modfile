@@ -185,6 +185,8 @@ pub struct PTModule {
 	pub positions: Positions, // The order in which to play patterns
 	/// Magic bytes, either M.K. or FLT4
 	pub mk: [u8; 4], // Set to M.K.
+	/// Number of channels per row
+	pub num_channels: usize,
 	/// The patterns
 	pub patterns: Vec<Pattern>,
 }
@@ -192,8 +194,8 @@ pub struct PTModule {
 impl PTModule {
 	pub fn new() -> PTModule {
 		let ptmod = PTModule{name: String::new(), sample_info: Vec::new(), length:0, 
-			nt_restart: 127, positions: Positions{data: [0; 128]}, mk: MAGIC_MK, 
-			patterns: Vec::new() };
+			nt_restart: 127, positions: Positions{data: [0; 128]}, mk: MAGIC_MK,
+			num_channels: DEFAULT_NUMBER_OF_CHANNELS_PER_ROW, patterns: Vec::new() };
 			
 		ptmod
 	}
@@ -576,6 +578,13 @@ pub fn write_mod(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 				write_all(writer,&data)?;
 			}
 		}
+		// Write extra rows so that there are 64 rows
+		for _ in 0..DEFAULT_NUMBER_OF_ROWS_PER_PATTERN-pattern_it.rows.len() {
+			let data = [0u8; 4];
+			for _ in 0..module.num_channels {
+				write_all(writer,&data)?;
+			}
+		}
 	}
 	
 	// And finally all samples
@@ -634,7 +643,7 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 		module.mk != MAGIC_8CHN {
 		return Err(PTMFError::Parse(format!("Unknown format {:?}", module.mk)));
 	}
-	let num_channels = 
+	module.num_channels = 
 		if  module.mk == MAGIC_6CHN {
 			6
 		} else if  module.mk == MAGIC_8CHN {
@@ -651,7 +660,7 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 	}
 	num_patterns += 1;
 	for _ in 0..num_patterns {
-		let mut pattern = Pattern::new(DEFAULT_NUMBER_OF_ROWS_PER_PATTERN,num_channels);
+		let mut pattern = Pattern::new(DEFAULT_NUMBER_OF_ROWS_PER_PATTERN,module.num_channels);
 		for row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
@@ -884,6 +893,7 @@ fn decode_p61_row(data: &Vec<u8>, current_pos: &mut usize, pattern_number: usize
 /// Read an Amiga ProTracker file packed with The Player 6.1
 pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	let mut module = PTModule::new();
+	module.num_channels = DEFAULT_NUMBER_OF_CHANNELS_PER_ROW;
 	
 	// Read the entire file to a Vec<u8>
 	// since the format uses a lot of offsets
@@ -1325,6 +1335,58 @@ mod tests {
 				return Err(())
 			}
 		}; 
+		let mut new_data:Vec<u8> = Vec::new();
+		match write_mod(&mut new_data, &module) {
+			Ok(_) => (),
+			Err(e) => {
+				println!("Failed to write module. Error: '{:?}'", e);
+				return Err(());
+			}
+		};
+
+		assert!(org_data == new_data);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_write_mod_truncated() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+		let infilename = format!("{}/testdata/{}",basedir, "truncate_patterns.mod");
+
+		let mut file = match File::open(&infilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		let mut org_data:Vec<u8> = Vec::new();
+		let _data_size = match file.read_to_end(&mut org_data) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to read file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		let mut module = match read_mod(&mut org_data.as_slice(), true) {
+			Ok(module) => module,
+			Err(e) => {
+				println!("Failed to parse file: '{}' Error: '{:?}'", infilename, e);
+				return Err(())
+			}
+		}; 
+
+		// remove som rows
+		for _ in 0..10 {
+			module.patterns[0].rows.pop();
+			module.patterns[2].rows.pop();
+			module.patterns[5].rows.pop();
+			module.patterns[7].rows.pop();
+		}
+
 		let mut new_data:Vec<u8> = Vec::new();
 		match write_mod(&mut new_data, &module) {
 			Ok(_) => (),
