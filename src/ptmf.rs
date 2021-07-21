@@ -1639,7 +1639,7 @@ mod tests {
 	fn test_truncate_samples() -> Result<(),()> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
-		let infilename = format!("{}/testdata/{}",basedir, "truncate.mod");
+		let infilename = format!("{}/testdata/{}",basedir, "truncate_samples.mod");
 		let mut module = load_module(infilename)?;
 
 		module.truncate_samples();
