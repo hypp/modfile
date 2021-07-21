@@ -1391,6 +1391,7 @@ mod tests {
 		let mut module = load_module(infilename)?;
 
 		module.remove_unused_samples();
+		assert!(module.sample_info.len() == DEFAULT_NUMBER_OF_SAMPLES);
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
 		let num_samples = samples.count();
 		assert!(num_samples == 31);
@@ -1409,6 +1410,7 @@ mod tests {
 		let mut module = load_module(infilename)?;
 
 		module.remove_unused_samples();
+		assert!(module.sample_info.len() == 0);
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
 		let num_samples = samples.count();
 		assert!(num_samples == 0);
@@ -1427,6 +1429,7 @@ mod tests {
 		let mut module = load_module(infilename)?;
 
 		module.remove_unused_samples();
+		assert!(module.sample_info.len() == 30);
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
 		let num_samples = samples.count();
 		assert!(num_samples == 30);
@@ -1487,6 +1490,7 @@ mod tests {
 		let mut module = load_module(infilename)?;
 
 		module.remove_duplicate_samples();
+		assert!(module.sample_info.len() == 1);
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
 		let num_samples = samples.count();
 		assert!(num_samples == 1);
@@ -1506,6 +1510,7 @@ mod tests {
 
 		module.remove_duplicate_samples();
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		assert!(module.sample_info.len() == 3);
 		let num_samples = samples.count();
 		assert!(num_samples == 3);
 
@@ -1524,6 +1529,7 @@ mod tests {
 
 		module.remove_duplicate_samples();
 		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		assert!(module.sample_info.len() == 3);
 		let num_samples = samples.count();
 		assert!(num_samples == 3);
 
