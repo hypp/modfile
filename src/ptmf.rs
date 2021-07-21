@@ -417,6 +417,26 @@ impl PTModule {
 			}
 		}
 	}
+
+	pub fn truncate_patterns(&mut self) {
+		for pattern in &mut self.patterns {
+			let mut found = false;
+			for i in 0..pattern.rows.len() {
+				for channel in &pattern.rows[i].channels {
+					let effect = (channel.effect & 0xf00) >> 8;
+					if effect == 0xd || effect == 0xb {
+						found = true;
+						break;
+					}
+				}
+				// Did we find a break?
+				if found {
+					pattern.rows.truncate(i+1);
+					break;
+				}
+			} // for rows
+		} // for patterns
+	}
 }
 
 fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
