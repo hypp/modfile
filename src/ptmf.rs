@@ -397,7 +397,23 @@ impl PTModule {
 			// Remove sample info
 			self.sample_info.remove(idx as usize);
 		}
+	}
 
+	pub fn truncate_samples(&mut self) {
+		for si in &mut self.sample_info {
+			// Check if this is a looping sample
+			if si.repeat_length > 1 || si.repeat_start > 0 {
+				// The Player truncates samples to repeat_end
+				// which is repeat_start + repeat_length
+				// repeat_end is in words, so convert to bytes
+				let repeat_end = (2*(si.repeat_start+si.repeat_length)) as usize;
+				if si.data.len() < repeat_end {
+					println!("Error: repeat end '{}' is greater then sample length '{}' Sample '{}'",repeat_end,si.data.len(),si.name);
+				}
+
+				si.data.truncate(repeat_end);
+			}
+		}
 	}
 }
 
