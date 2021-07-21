@@ -1243,6 +1243,42 @@ mod tests {
 		Ok(())
     }
 
+	#[test]
+	fn test_read_mod() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+		let infilename = format!("{}/testdata/{}",basedir, "spiderfunk.mod");
+
+		let file = match File::open(&infilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+		
+		let mut reader = BufReader::new(&file);
+		let module = match read_mod(&mut reader, true) {
+			Ok(module) => module,
+			Err(e) => {
+				println!("Failed to parse file: '{}' Error: '{:?}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		// Close file
+		drop(file);
+
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 18);
+		assert!(module.sample_info.len() == 31);
+		assert!(module.length == 25);
+		assert!(module.patterns.len() == 13);
+
+		Ok(())
+	}
+
+
     #[test]
 	fn test_find_duplicate_patterns() -> Result<(),()> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
