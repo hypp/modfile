@@ -1168,6 +1168,8 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	let mut workmodule = module.clone();
 
 	// Prepare all data first
+	workmodule.truncate_samples();
+	workmodule.remove_duplicate_samples();
 	workmodule.remove_unused_samples();
 	workmodule.remove_duplicate_patterns();
 	workmodule.remove_unused_patterns();
