@@ -1633,6 +1633,27 @@ mod tests {
 		Ok(())
 	}
 
+	#[test]
+	fn test_truncate_samples() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "truncate.mod");
+		let mut module = load_module(infilename)?;
+
+		module.truncate_samples();
+
+		assert!(module.sample_info[0].data.len() == 7820);
+		assert!(module.sample_info[1].data.len() == 7820);
+		assert!(module.sample_info[2].data.len() == 5278);
+		assert!(module.sample_info[3].data.len() == 2540);
+		assert!(module.sample_info[4].data.len() == 7820);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_samples_same_sample_rep.mod");
+		save_module(outfilename,module)?;
+
+		Ok(())
+	}
+
 }
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
