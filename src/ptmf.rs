@@ -1732,7 +1732,28 @@ mod tests {
 		assert!(module.sample_info[3].data.len() == 2540);
 		assert!(module.sample_info[4].data.len() == 7820);
 
-		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_samples_same_sample_rep.mod");
+		let outfilename = format!("{}/{}",basedir, "test_truncate_samples.mod");
+		save_module(outfilename,module)?;
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_truncate_patterns() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "truncate_patterns.mod");
+		let mut module = load_module(infilename)?;
+
+		module.truncate_patterns();
+
+		assert!(module.patterns[0].rows.len() == 33);
+		assert!(module.patterns[1].rows.len() == 33);
+		assert!(module.patterns[2].rows.len() == 49);
+		assert!(module.patterns[3].rows.len() == 49);
+		assert!(module.patterns[4].rows.len() == 41);
+
+		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_patterns.mod");
 		save_module(outfilename,module)?;
 
 		Ok(())
