@@ -1138,20 +1138,31 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 }
 
 /// Encode one Channel data into p61 format 
-fn encode_p61_channel(channel: &Channel) -> u32 {
+fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 
-	let mut note_index = 0;
-	for i in 0..PERIODS.len() {
-		if PERIODS[i] == channel.period {
-			note_index = (i - 11) as u32;
-			break;
-		}
-	}
-	
-	let note_index = (note_index & 0b111111) as u32; 
-	let sample_number = (channel.sample_number & 0b11111) as u32;
-	let mut effect = (channel.effect & 0b111111111111) as u32;
-	let cmd = (effect & 0xf00) >> 8 as u8;
+	let mut data:Vec<u8> = Vec::new();
+
+// 4 different cases:
+// pnnnnnni => 2 more bytes follow iiiicccc bbbbbbbb => Note, instrument and effect
+// p110cccc => 1 more byte follows bbbbbbbb => Only effect
+// p1110nnn => 1 more byte follows => nnniiiii => Note and instrument, no effect
+// p1111111 => 0 more bytes follow => Empty row
+
+	let has_note_or_instrument = (channel.period > 0) || (channel.sample_number > 0);
+	let has_effect = channel.effect > 0;
+
+	// if channel.period == 0 then there is no note
+	// else try to find it in the array
+	// TODO create a map/hash/dict for fast lookup
+	let period_idx = if channel.period == 0 {
+		0 as u8
+	} else {
+		PERIODS.iter().position(|&element| element == channel.period).unwrap() as u8 - 11
+	};
+	let instrument_idx = channel.sample_number;
+	let mut effect = channel.effect;
+
+	let cmd = (effect & 0xf00) >> 8;
 	let params = effect & 0xff;
 	let param1 = (effect & 0xf0) >> 4;
 	let param2 = effect & 0xf;
@@ -1185,12 +1196,44 @@ fn encode_p61_channel(channel: &Channel) -> u32 {
 			0xD => (), // TODO Handle jump
 			_ => ()
 		}
-
 	}
-	
-	let p61 = (note_index << 25) | (sample_number << 20) | (effect << 8);
-//	println!("P: {:X} Note: {:b}", p61,p61);
-	p61
+
+	// Now we have all data we need to encode the command
+
+	if has_note_or_instrument && has_effect {
+		// note, instrument and effect
+		data.push(0);
+		data.push(0);
+		data.push(0);
+
+		data[0] = ((period_idx & 0b111111) << 1) | ((instrument_idx & 0b10000) >> 4);
+		data[1] = ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8;
+		data[2] = (effect & 0xff) as u8;
+		
+	} else if has_note_or_instrument {
+		// note and instrument
+		data.push(0);
+		data.push(0);
+
+		data[0] = (0b01110000) | ((period_idx & 0b111111) >> 3);
+		data[1] = ((period_idx & 0b111111) << 5) | (instrument_idx & 0b11111);
+
+	} else if has_effect {
+		// effect
+		data.push(0);
+		data.push(0);
+
+		data[0] = (0b01100000) | ((effect & 0xf00) >> 8) as u8;
+		data[1] = (effect & 0xff) as u8;
+
+	} else {
+		// Must be empty
+		data.push(0);
+		data[0] = 0b01111111;
+	}
+
+
+	data
 }
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
@@ -1757,6 +1800,99 @@ mod tests {
 		let outfilename = format!("{}/{}",basedir, "test_remove_duplicate_patterns.mod");
 		save_module(outfilename,module)?;
 
+		Ok(())
+	}
+
+	#[test]
+	fn test_encode_p61_channel() -> Result<(),()> {
+		let mut ch = Channel::new();
+
+		// Empty
+		ch.effect = 0;
+		ch.sample_number = 0;
+		ch.period = 0;
+		let res = encode_p61_channel(&ch);
+		assert!(res.len() == 1);
+		assert!(res[0] == 0b01111111);
+
+		// Only effect
+		ch.effect = 0xc3f;
+		ch.sample_number = 0;
+		ch.period = 0;
+		let res = encode_p61_channel(&ch);
+		let effect = ch.effect;
+		assert!(res.len() == 2);
+		assert!(res[0] == (0b01100000) | ((effect & 0xf00) >> 8) as u8);
+		assert!(res[1] == (effect & 0xff) as u8);
+
+		// all periods and alla samples and no effect
+		for i in 12..PERIODS.len() {
+			ch.period = PERIODS[i];
+			for sample_nr in 1..32 {
+				ch.sample_number = sample_nr;
+				ch.effect = 0;
+
+				let res = encode_p61_channel(&ch);
+				assert!(res.len() == 2);
+				let period_idx = i-11;
+				let instrument_idx = sample_nr;
+				assert!(res.len() == 2);
+				assert!(res[0] == (0b01110000) | ((period_idx & 0b111111) >> 3) as u8);
+				assert!(res[1] == ((period_idx & 0b111111) << 5) as u8 | (instrument_idx & 0b11111));
+			}
+		}
+
+
+		// all periods and alla samples and effect
+		for i in 12..PERIODS.len() {
+			ch.period = PERIODS[i];
+			for sample_nr in 1..32 {
+				ch.sample_number = sample_nr;
+				ch.effect = 0xc30;
+
+				let res = encode_p61_channel(&ch);
+				let period_idx = i-11;
+				let instrument_idx = sample_nr;
+				let effect = ch.effect;
+				assert!(res.len() == 3);
+				assert!(res[0] == ((period_idx & 0b111111) << 1) as u8 | ((instrument_idx & 0b10000) >> 4));
+				assert!(res[1] == ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8);
+				assert!(res[2] == (effect & 0xff) as u8);
+			}
+		}
+
+		// periods and effects
+		for i in 12..PERIODS.len() {
+			ch.period = PERIODS[i];
+			ch.sample_number = 0;
+			ch.effect = 0xc3f;
+
+			let res = encode_p61_channel(&ch);
+			let period_idx = i-11;
+			let instrument_idx = ch.sample_number;
+			let effect = ch.effect;
+			assert!(res.len() == 3);
+			assert!(res[0] == ((period_idx & 0b111111) << 1) as u8 | ((instrument_idx & 0b10000) >> 4));
+			assert!(res[1] == ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8);
+			assert!(res[2] == (effect & 0xff) as u8);
+		}
+
+		// instrument and effects
+		for sample_nr in 1..32 {
+			ch.period = 0;
+			ch.sample_number = sample_nr;
+			ch.effect = 0xc3f;
+
+			let res = encode_p61_channel(&ch);
+			let period_idx = 0;
+			let instrument_idx = ch.sample_number;
+			let effect = ch.effect;
+			assert!(res.len() == 3);
+			assert!(res[0] == ((period_idx & 0b111111) << 1) as u8 | ((instrument_idx & 0b10000) >> 4));
+			assert!(res[1] == ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8);
+			assert!(res[2] == (effect & 0xff) as u8);
+		}
+	
 		Ok(())
 	}
 
