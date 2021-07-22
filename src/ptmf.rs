@@ -956,6 +956,7 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	
 	let mut sample_start = sample_offset as usize;
 	for i in 0..num_samples as usize {
+		module.sample_info.push(SampleInfo::new());
 		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
 		let finetune = data[pos+2];
 		let volume = data[pos+3];
