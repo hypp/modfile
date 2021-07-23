@@ -115,6 +115,10 @@ impl Channel {
 	pub fn new() -> Channel {
 		Channel{period: 0, sample_number: 0, effect: 0}
 	}
+
+	pub fn is_empty(&self) -> bool {
+		self.period == 0 && self.sample_number == 0 && self.effect == 0
+	}
 }
 
 /// A single row in a Pattern.
@@ -1079,6 +1083,7 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	module.length = length as u8;
 	
 	let pattern_start_offset = pos;
+	println!("patterndata address: {:X}",pattern_start_offset);
 	
 	// Pop removes from the end of Vec
 	pattern_offsets.reverse();
@@ -1138,7 +1143,7 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 }
 
 /// Encode one Channel data into p61 format 
-fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
+fn qqq_encode_p61_channel(channel: &Channel) -> Vec<u8> {
 
 	let mut data:Vec<u8> = Vec::new();
 
@@ -1236,8 +1241,79 @@ fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 	data
 }
 
+
+fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
+	let mut data:Vec<u8> = Vec::new();
+
+	let period_idx = if channel.period == 0 {
+		0 as u8
+	} else {
+		PERIODS.iter().position(|&element| element == channel.period).unwrap() as u8 - 11
+	};
+	let instrument_idx = channel.sample_number;
+	let mut effect = channel.effect;
+
+	let cmd = (effect & 0xf00) >> 8;
+	let params = effect & 0xff;
+	let param1 = (effect & 0xf0) >> 4;
+	let param2 = effect & 0xf;
+	
+	// Some effects must be rewritten
+	if cmd == 0xE {
+		// E commands are special, handled below
+		match param1 {
+			0 => effect = (effect & 0xff) | ((param2 & 1) * 2),
+			1 | 2 | 9 | 0xA | 0xB | 0xD | 0xE if param2 == 0 => effect = 0, // No effect if empty paramters,
+			3 | 4 | 5 | 6 | 7 | 8 | 0xF => (),
+			0xC if param2 == 0 => effect = 0xC00, // Replace with empty volume
+			_ => ()
+		}
+		
+	} else {
+		match cmd {
+			0 if params != 0 => effect |= 0x800,	// Effect 0 replaced with 8
+			1 | 2 | 0xA if params == 0 => effect = 0, // No effect if parameters empty
+			3 | 4 | 7 | 9 | 0xF => (),
+			5 if params == 0 => effect = 0x300,
+			6 if params == 0 => effect = 0x400,
+			5 | 6 | 0xA if params != 0 && param1 == 0 => effect &= 0xf0f,
+			5 | 6 | 0xA if params != 0 && param1 != 0 => {
+				let p = 0 - param2;
+				effect = (effect & 0xf00) | (p & 0xff);
+			},
+			8 => effect = 0xe80 | param2, // Effect 8 replaced with E8
+			0xB => (), // TODO Handle break
+			0xC if params > 64 => effect = 0xC40,
+			0xD => (), // TODO Handle jump
+			_ => ()
+		}
+	}
+
+	// result should be 4 bytes
+	// pnnnnnni iiiicccc bbbbbbbb 0
+	// p = compression flag
+	// n = note index
+	// i = instrument index
+	// c = effect
+	// b = effect params
+	// 0 = compression info
+
+	let byte1 = 0 | ((period_idx << 1) & 0b01111110) as u8 | ((instrument_idx >> 4) & 0b00000001) as u8;
+	let byte2 = ((instrument_idx & 0b00001111) << 4) as u8 | ((effect & 0xf00) >> 8) as u8;
+	let byte3 = (effect & 0xff) as u8; 
+	let byte4 = 0;
+	data.push(byte1);
+	data.push(byte2);
+	data.push(byte3);
+	data.push(byte4);
+
+	data
+}
+
+
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
 pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
+	// TODO fail if not 4 channels
 
 	let mut workmodule = module.clone();
 
@@ -1245,6 +1321,7 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	workmodule.truncate_samples();
 	workmodule.remove_duplicate_samples();
 	workmodule.remove_unused_samples();
+	workmodule.truncate_patterns();
 	workmodule.remove_duplicate_patterns();
 	workmodule.remove_unused_patterns();
 
@@ -1334,6 +1411,41 @@ mod tests {
 		};
 		Ok(())
     }
+
+	#[test]
+	fn test_read_p61() -> Result<(),()> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+		let infilename = format!("{}/{}",basedir, "P61.incy-wincy.mod");
+
+		let file = match File::open(&infilename) {
+			Ok(file) => file,
+			Err(e) => {
+				println!("Failed to open file: '{}' Error: '{}'", infilename, e);
+				return Err(())
+			}
+		};
+		
+		let mut reader = BufReader::new(&file);
+		let module = match read_p61(&mut reader) {
+			Ok(module) => module,
+			Err(e) => {
+				println!("Failed to parse file: '{}' Error: '{:?}'", infilename, e);
+				return Err(())
+			}
+		};
+
+		// Close file
+		drop(file);
+
+//		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+//		let num_samples = samples.count();
+//		assert!(num_samples == 18);
+//		assert!(module.sample_info.len() == 31);
+//		assert!(module.length == 25);
+//		assert!(module.patterns.len() == 13);
+
+		Ok(())
+	}
 
 	#[test]
 	fn test_read_mod() -> Result<(),()> {
@@ -1812,19 +1924,23 @@ mod tests {
 		ch.sample_number = 0;
 		ch.period = 0;
 		let res = encode_p61_channel(&ch);
-		assert!(res.len() == 1);
-		assert!(res[0] == 0b01111111);
+		assert!(res.len() == 4);
+		assert!(res[0] == 0);
+		assert!(res[1] == 0);
+		assert!(res[2] == 0);
+		assert!(res[3] == 0);
 
 		// Only effect
 		ch.effect = 0xc3f;
 		ch.sample_number = 0;
 		ch.period = 0;
 		let res = encode_p61_channel(&ch);
-		let effect = ch.effect;
-		assert!(res.len() == 2);
-		assert!(res[0] == (0b01100000) | ((effect & 0xf00) >> 8) as u8);
-		assert!(res[1] == (effect & 0xff) as u8);
-
+		assert!(res.len() == 4);
+		assert!(res[0] == 0);
+		assert!(res[1] == 0xc);
+		assert!(res[2] == 0x3f);
+		assert!(res[3] == 0);
+	
 		// all periods and alla samples and no effect
 		for i in 12..PERIODS.len() {
 			ch.period = PERIODS[i];
@@ -1833,12 +1949,13 @@ mod tests {
 				ch.effect = 0;
 
 				let res = encode_p61_channel(&ch);
-				assert!(res.len() == 2);
-				let period_idx = i-11;
-				let instrument_idx = sample_nr;
-				assert!(res.len() == 2);
-				assert!(res[0] == (0b01110000) | ((period_idx & 0b111111) >> 3) as u8);
-				assert!(res[1] == ((period_idx & 0b111111) << 5) as u8 | (instrument_idx & 0b11111));
+				let period_idx = (i-11) as u8;
+				let instrument_idx = sample_nr as u8;
+				assert!(res.len() == 4);
+				assert!(res[0] == ((period_idx << 1) | ((instrument_idx & 0b10000) >> 4)));
+				assert!(res[1] == ((instrument_idx & 0b1111) << 4));
+				assert!(res[2] == 0);
+				assert!(res[3] == 0);
 			}
 		}
 
@@ -1851,13 +1968,15 @@ mod tests {
 				ch.effect = 0xc30;
 
 				let res = encode_p61_channel(&ch);
-				let period_idx = i-11;
-				let instrument_idx = sample_nr;
-				let effect = ch.effect;
-				assert!(res.len() == 3);
-				assert!(res[0] == ((period_idx & 0b111111) << 1) as u8 | ((instrument_idx & 0b10000) >> 4));
-				assert!(res[1] == ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8);
-				assert!(res[2] == (effect & 0xff) as u8);
+				let period_idx = (i-11) as u8;
+				let instrument_idx = sample_nr as u8;
+				let cmd = (ch.effect >> 8) as u8;
+				let params = (ch.effect & 0xff) as u8;
+				assert!(res.len() == 4);
+				assert!(res[0] == ((period_idx << 1) | ((instrument_idx & 0b10000) >> 4)));
+				assert!(res[1] == ((instrument_idx & 0b1111) << 4) | (cmd & 0b1111));
+				assert!(res[2] == params);
+				assert!(res[3] == 0);
 			}
 		}
 
@@ -1868,14 +1987,16 @@ mod tests {
 			ch.effect = 0xc3f;
 
 			let res = encode_p61_channel(&ch);
-			let period_idx = i-11;
-			let instrument_idx = ch.sample_number;
-			let effect = ch.effect;
-			assert!(res.len() == 3);
-			assert!(res[0] == ((period_idx & 0b111111) << 1) as u8 | ((instrument_idx & 0b10000) >> 4));
-			assert!(res[1] == ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8);
-			assert!(res[2] == (effect & 0xff) as u8);
-		}
+			let period_idx = (i-11) as u8;
+			let instrument_idx = ch.sample_number as u8;
+			let cmd = (ch.effect >> 8) as u8;
+			let params = (ch.effect & 0xff) as u8;
+			assert!(res.len() == 4);
+			assert!(res[0] == ((period_idx << 1) | ((instrument_idx & 0b10000) >> 4)));
+			assert!(res[1] == ((instrument_idx & 0b1111) << 4) | (cmd & 0b1111));
+			assert!(res[2] == params);
+			assert!(res[3] == 0);
+	}
 
 		// instrument and effects
 		for sample_nr in 1..32 {
@@ -1884,13 +2005,15 @@ mod tests {
 			ch.effect = 0xc3f;
 
 			let res = encode_p61_channel(&ch);
-			let period_idx = 0;
-			let instrument_idx = ch.sample_number;
-			let effect = ch.effect;
-			assert!(res.len() == 3);
-			assert!(res[0] == ((period_idx & 0b111111) << 1) as u8 | ((instrument_idx & 0b10000) >> 4));
-			assert!(res[1] == ((instrument_idx & 0b1111) << 4) | ((effect & 0xf00) >> 8) as u8);
-			assert!(res[2] == (effect & 0xff) as u8);
+			let period_idx = 0 as u8;
+			let instrument_idx = ch.sample_number as u8;
+			let cmd = (ch.effect >> 8) as u8;
+			let params = (ch.effect & 0xff) as u8;
+			assert!(res.len() == 4);
+			assert!(res[0] == ((period_idx << 1) | ((instrument_idx & 0b10000) >> 4)));
+			assert!(res[1] == ((instrument_idx & 0b1111) << 4) | (cmd & 0b1111));
+			assert!(res[2] == params);
+			assert!(res[3] == 0);
 		}
 	
 		Ok(())
