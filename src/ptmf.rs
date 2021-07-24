@@ -1310,6 +1310,67 @@ fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 	data
 }
 
+/// read one command from stream
+/// convert it and write it to packed_stream
+/// TODO this might be better to do with Read and Write traits
+fn p61_putdata(stream:&Vec<u8>,stream_offset:&mut usize,packed_stream:&mut Vec<u8>) {
+
+	// input
+	// pnnnnnni iiiicccc bbbbbbbb 0
+	// p = compression flag
+	// n = note index
+	// i = instrument index
+	// c = effect
+	// b = effect params
+	// 0 = compression info
+
+	let byte1 = stream[*stream_offset+0];
+	let byte2 = stream[*stream_offset+1];
+	let byte3 = stream[*stream_offset+2];
+	let byte4 = stream[*stream_offset+3];
+
+	let word1 = (byte1 as u16) << 8 | byte2 as u16;
+	let compression_flag = byte1 & 0x80;
+
+	// output
+	// 4 different cases:
+	// pnnnnnni => 2 more bytes follow iiiicccc bbbbbbbb => Note, instrument and effect
+	// p110cccc => 1 more byte follows bbbbbbbb => Only effect
+	// p1110nnn => 1 more byte follows => nnniiiii => Note and instrument, no effect
+	// p1111111 => 0 more bytes follow => Empty row
+
+	if byte1 & 0x7e != 0 || word1 & 0x1f0 != 0 {
+		if byte2 & 0xf != 0 {
+			// note, instrument and command
+			// pnnnnnni => 2 more bytes follow iiiicccc bbbbbbbb => Note, instrument and effect
+			packed_stream.push(byte1);
+			packed_stream.push(byte2);
+			packed_stream.push(byte3);
+		} else {
+			// Note and instrument
+			// p1110nnn => 1 more byte follows => nnniiiii => Note and instrument, no effect
+			packed_stream.push(compression_flag | 0b01110000 | (byte1 & 0b01110000) >> 4);
+			packed_stream.push((byte1 & 0b1111) << 4 | (byte2 & 0b11110000) >> 4);
+		}
+	} else if byte2 & 0xf == 0 {
+		// empty
+		// p1111111 => 0 more bytes follow => Empty row
+		packed_stream.push(compression_flag | 0x7f);
+	} else {
+		// command
+		// encode as only command
+		// p110cccc => 1 more byte follows bbbbbbbb => Only effect
+		packed_stream.push(compression_flag | 0b01100000 | byte2 & 0xf);
+		packed_stream.push(byte3);
+	}
+
+	if compression_flag == 0x80 {
+		packed_stream.push(byte4);
+	}
+
+	*stream_offset += 4;
+}
+
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
 pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
@@ -2016,6 +2077,154 @@ mod tests {
 			assert!(res[3] == 0);
 		}
 	
+		Ok(())
+	}
+
+	#[test]
+	fn test_p61_putdata() -> Result<(),()> {
+
+		// input
+		// pnnnnnni iiiicccc bbbbbbbb 0
+		// p = compression flag
+		// n = note index
+		// i = instrument index
+		// c = effect
+		// b = effect params
+		// 0 = compression info
+
+		// output
+		// 4 different cases:
+		// pnnnnnni => 2 more bytes follow iiiicccc bbbbbbbb => Note, instrument and effect
+		// p110cccc => 1 more byte follows bbbbbbbb => Only effect
+		// p1110nnn => 1 more byte follows => nnniiiii => Note and instrument, no effect
+		// p1111111 => 0 more bytes follow => Empty row
+
+		// empty
+		let data:Vec<u8> = vec![0,0,0,0];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 1);
+		assert!(result[0] == 0x7f);
+
+		// empty with compression
+		let data:Vec<u8> = vec![0x80,0,0,0x23];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 2);
+		assert!(result[0] == 0xff);
+		assert!(result[1] == 0x23);
+
+		// Note only
+		let data:Vec<u8> = vec![4<<1,0,0,0];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 2);
+		assert!(result[0] == 0b01110000);
+		assert!(result[1] == 4 << 5);
+
+		// Note only and compression
+		let data:Vec<u8> = vec![0x80 | 4<<1,0,0,0x84];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 3);
+		assert!(result[0] == 0x80 | 0b01110000);
+		assert!(result[1] == 4 << 5);
+		assert!(result[2] == 0x84);
+
+		// Note and instrument
+		let data:Vec<u8> = vec![4<<1,7<<4,0,0];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 2);
+		assert!(result[0] == 0b01110000);
+		assert!(result[1] == 4 << 5 | 7);
+
+		// Note and instrument and compression
+		let data:Vec<u8> = vec![0x80 | 4<<1,7<<4,0,8];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 3);
+		assert!(result[0] == 0x80 | 0b01110000);
+		assert!(result[1] == 4 << 5 | 7);
+		assert!(result[2] == 8);
+
+		// Instrument only
+		let data:Vec<u8> = vec![0,7<<4,0,0];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 2);
+		assert!(result[0] == 0b01110000);
+		assert!(result[1] == 7);
+
+		// Instrument and compression
+		let data:Vec<u8> = vec![0x80 ,7<<4,0,8];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 3);
+		assert!(result[0] == 0x80 | 0b01110000);
+		assert!(result[1] == 7);
+		assert!(result[2] == 8);
+
+		// Effect only
+		let data:Vec<u8> = vec![0,9,0x45,0];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 2);
+		assert!(result[0] == 0b01100000 | 9);
+		assert!(result[1] == 0x45);
+		
+		// Effect only and compression
+		let data:Vec<u8> = vec![0x80,9,0x45,0x89];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 3);
+		assert!(result[0] == 0x80 | 0b01100000 | 9);
+		assert!(result[1] == 0x45);
+		assert!(result[2] == 0x89);
+
+		// All data
+		let data:Vec<u8> = vec![12<<1,7<<4|0xe,0x23,0];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 3);
+		assert!(result[0] == 12<<1);
+		assert!(result[1] == 7<<4|0xe);
+		assert!(result[2] == 0x23);
+
+		// All data and compression
+		let data:Vec<u8> = vec![0x80|12<<1,7<<4|0xe,0x23,0x84];
+		let mut offset = 0;
+		let mut result:Vec<u8> = vec![];
+		p61_putdata(&data, &mut offset, &mut result);
+		assert!(offset == 4);
+		assert!(result.len() == 4);
+		assert!(result[0] == 0x80|12<<1);
+		assert!(result[1] == 7<<4|0xe);
+		assert!(result[2] == 0x23);
+		assert!(result[3] == 0x84);
+
 		Ok(())
 	}
 
