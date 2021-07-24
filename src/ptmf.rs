@@ -1387,7 +1387,172 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	workmodule.remove_unused_patterns();
 
 
+	// The Player uses 2 passes
+	// First pass: 
+	// - some bit fiddling to reorder bits, still keeping it within one u32
+	// - remove empty rows
+	// - remove duplicate rows
 
+	// Second pass:
+	// - encode using fewer bits
+	// - LZ77 style compression
+
+	// First pass
+	let mut pattern_offsets:Vec<Vec<usize>> = Vec::new();
+	let mut stream:Vec<u8> = Vec::new();
+
+	for channel_idx in 0..4 {
+		for pattern_idx in 0..workmodule.patterns.len() {
+			// Save offset for this channel and this pattern
+			if pattern_offsets.len() == pattern_idx {
+				pattern_offsets.push(vec![0; 4]);
+			}
+			pattern_offsets[pattern_idx][channel_idx] = stream.len();
+			let pattern = &workmodule.patterns[pattern_idx];
+			let channel = &pattern.rows[0].channels[channel_idx];
+			let mut encoded = encode_p61_channel(&channel);
+
+			let mut previous_idx = stream.len();
+			stream.append(&mut encoded);
+
+			for row_nr in 1..pattern.rows.len() {
+				let channel = &pattern.rows[row_nr].channels[channel_idx];
+				let mut encoded = encode_p61_channel(&channel);
+				
+				let has_compression_info = (stream[previous_idx+0] & 0x80) == 0x80;
+
+				let is_empty = encoded[0] == 0 && 
+								encoded[1] == 0 && 
+								encoded[2] == 0 && 
+								encoded[3] == 0;
+				let is_same = encoded[0] == (stream[previous_idx+0] & 0x7f) &&
+								encoded[1] == stream[previous_idx+1] &&
+								encoded[2] == stream[previous_idx+2];
+
+				if has_compression_info {
+					let compression_type = stream[previous_idx+3] & 0x80;
+					if is_empty && compression_type == 0 {
+						// current is empty and compression type is empty
+						stream[previous_idx+3] += 1;
+					} else if is_same && compression_type == 0x80 {
+						// current is same and compression type is same
+						stream[previous_idx+3] += 1;
+					} else {
+						// new data
+						previous_idx = stream.len();
+						stream.append(&mut encoded);	
+					}
+				} else {
+					// no compression info
+					if is_empty {
+						stream[previous_idx+0] |= 0x80;
+						stream[previous_idx+3] = 0b00000001;
+					} else if is_same {
+						stream[previous_idx+0] |= 0x80;
+						stream[previous_idx+3] = 0b10000001;
+					} else {
+						// new data
+						previous_idx = stream.len();
+						stream.append(&mut encoded);	
+					}
+				} // if has compression info
+
+			} // for row_nr
+		} // for pattern_idx
+	} // for channel_idx
+
+	let verbose = false;
+	if verbose {
+		println!("pattern_offsets: {:?}",pattern_offsets);
+		for i in 0..pattern_offsets.len() {
+			println!("***** Pattern {}",i);
+			let pattern = &pattern_offsets[i];
+
+			let mut ch0 = pattern[0];
+			let mut ch1 = pattern[1];
+			let mut ch2 = pattern[2];
+			let mut ch3 = pattern[3];
+
+			let mut ch0_end = 0;
+			let mut ch1_end = 0;
+			let mut ch2_end = 0;
+			let mut ch3_end = 0;
+
+			if i+1 < pattern_offsets.len() {
+				let next_pattern = &pattern_offsets[i+1];
+
+				ch0_end = next_pattern[0];
+				ch1_end = next_pattern[1];
+				ch2_end = next_pattern[2];
+				ch3_end = next_pattern[3];
+		
+			} else {
+				let first_pattern = &pattern_offsets[0];
+
+				ch0_end = first_pattern[1];
+				ch1_end = first_pattern[2];
+				ch2_end = first_pattern[3];
+				ch3_end = stream.len();
+			};
+
+			let mut wrote_something = true;
+			while wrote_something {
+				wrote_something = false;
+
+				if ch0 < ch0_end {
+					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch0],stream[ch0+1],stream[ch0+2],stream[ch0+3]);
+					wrote_something = true;
+				} else {
+					print!(".. .. .. ..    ");
+				}
+
+				if ch1 < ch1_end {
+					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch1],stream[ch1+1],stream[ch1+2],stream[ch1+3]);
+					wrote_something = true;
+				} else {
+					print!(".. .. .. ..    ");
+				}
+
+				if ch2 < ch2_end {
+					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch2],stream[ch2+1],stream[ch2+2],stream[ch2+3]);
+					wrote_something = true;
+				} else {
+					print!(".. .. .. ..    ");
+				}
+
+				if ch3 < ch3_end {
+					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch3],stream[ch3+1],stream[ch3+2],stream[ch3+3]);
+					wrote_something = true;
+				} else {
+					print!(".. .. .. ..    ");
+				}
+				println!();
+
+				ch0 += 4;
+				ch1 += 4;
+				ch2 += 4;
+				ch3 += 4;
+			}
+		}
+	//	println!("stream:");
+	//	for i in (0..stream.len()).step_by(4) {
+	//		println!("{:x} {:x} {:x} {:x}",stream[i],stream[i+1],stream[i+2],stream[i+3]);
+	//	}
+	}
+
+	let mut read_offset = 0;
+	let mut packed_stream:Vec<u8> = Vec::new();
+	p61_putdata(&stream, &mut read_offset, &mut packed_stream);
+
+	println!("{:2x} {:2x} {:2x} {:2x}", stream[read_offset-4]+0, stream[read_offset-4+1],stream[read_offset-4]+2,stream[read_offset-4]+3);
+	let write_offset = packed_stream.len();
+	println!("=> {:2x} {:2x} {:2x} {:2x}", packed_stream[write_offset-4]+0, packed_stream[write_offset-4+1],packed_stream[write_offset-4]+2,packed_stream[write_offset-4]+3);
+
+	p61_putdata(&stream, &mut read_offset, &mut packed_stream);
+
+	println!("{:2x} {:2x} {:2x} {:2x}", stream[read_offset-4]+0, stream[read_offset-4+1],stream[read_offset-4]+2,stream[read_offset-4]+3);
+	let write_offset = packed_stream.len();
+	println!("=> {:2x} {:2x} {:2x} {:2x}", packed_stream[write_offset-4]+0, packed_stream[write_offset-4+1],packed_stream[write_offset-4]+2,packed_stream[write_offset-4]+3);
 
 	// Then we write it
 
