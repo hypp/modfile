@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::io::Read;
+use std::io::Cursor;
 use std::fmt;
 use std::cmp;
 use std::io;
@@ -2445,6 +2446,90 @@ mod tests {
 
 		Ok(())
 	}
+
+	#[test]
+	fn test_p61_fetchdata() -> Result<(),()> {
+
+		let mut encoded:Vec<u8> = Vec::new();
+
+		encoded.extend(&vec![0x7f]);
+		encoded.extend(&vec![0xff,0x23u8]);
+		encoded.extend(&vec![0b01110000,4 << 5]);
+		encoded.extend(&vec![0x80 | 0b01110000,4 << 5,0x84]);
+		encoded.extend(&vec![0b01110000,4 << 5 | 7]);
+		encoded.extend(&vec![0x80 | 0b01110000,4 << 5 | 7,8]);
+		encoded.extend(&vec![0b01110000,7]);
+		encoded.extend(&vec![0x80 | 0b01110000,7,8]);
+		encoded.extend(&vec![0b01100000 | 9,0x45]);
+		encoded.extend(&vec![0x80 | 0b01100000 | 9,0x45, 0x89]);
+		encoded.extend(&vec![12<<1,7<<4|0xe, 0x23]);
+		encoded.extend(&vec![0x80|12<<1,7<<4|0xe, 0x23,0x84]);
+		encoded.extend(&vec![0xff,0b01000000|32,0x56]);
+		encoded.extend(&vec![0xff,0b11000000|32,0x56,0x65]);
+
+		let mut cursor = Cursor::new(encoded);
+
+		// empty
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x7f);
+
+		// empty with compression
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xff23);
+
+		// Note only
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x7080);
+
+		// Note only and compression
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xf08084);
+
+
+		// Note and instrument
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x7087);
+
+		// Note and instrument and compression
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xf08708);
+
+		// Instrument only
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x7007);
+
+		// Instrument and compression
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xf00708);
+
+		// Effect only
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x6945);
+
+		// Effect only and compression
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xe94589);
+
+		// All data
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x187e23);
+
+		// All data and compression
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0x987e2384);
+
+		// 8 bit back reference
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xff60);
+
+		// 16 bit back reference
+		let res = p61_fetchdata(&mut cursor);
+		assert!(res == 0xffe0);
+
+		Ok(())
+	}
+
+
 
 }
 
