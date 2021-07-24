@@ -1371,6 +1371,59 @@ fn p61_putdata(stream:&Vec<u8>,stream_offset:&mut usize,packed_stream:&mut Vec<u
 	*stream_offset += 4;
 }
 
+/// convert a packed p61 channel row to u32 for easy comparision
+/// used while searching for doing LZ77 style packing
+fn p61_fetchdata(packed_stream: &mut dyn Read) -> u32 {
+	let mut data:u32;
+	let mut tmp = [0u8];
+
+	packed_stream.read_exact(&mut tmp).unwrap();
+	data = tmp[0] as u32;
+	let compression_flag = data & 0x80;
+	
+	if data & 0b01100000 != 0b01100000 {
+		// all
+		packed_stream.read_exact(&mut tmp).unwrap();
+		data = data << 8 | tmp[0] as u32;
+		packed_stream.read_exact(&mut tmp).unwrap();
+		data = data << 8 | tmp[0] as u32;
+		if compression_flag == 0x80 {
+			// read extra byte for compression
+			packed_stream.read_exact(&mut tmp).unwrap();
+			data = data << 8 | tmp[0] as u32;
+		}
+	} else if data & 0b01110000 == 0b01100000 || 
+			  data & 0b01111000 == 0b01110000 {
+		// onlycmd
+		// note and/or instrument
+		// these have the same length
+		packed_stream.read_exact(&mut tmp).unwrap();
+		data = data << 8 | tmp[0] as u32;
+		if compression_flag == 0x80 {
+			// read extra byte for compression
+			packed_stream.read_exact(&mut tmp).unwrap();
+			data = data << 8 | tmp[0] as u32;
+		}
+	} else {
+		// empty
+		if compression_flag == 0x80 {
+			// read extra byte for compression
+			packed_stream.read_exact(&mut tmp).unwrap();
+			data = data << 8 | tmp[0] as u32;
+			if data & 0b11000000 == 0x40 {
+				// read extra byte for byte offset
+				packed_stream.read_exact(&mut tmp).unwrap();
+			} else if data & 0b11000000 == 0xc0 {
+				// read extra bytes for word offset
+				packed_stream.read_exact(&mut tmp).unwrap();
+				packed_stream.read_exact(&mut tmp).unwrap();
+			} 
+		}
+	}
+
+	data
+}
+
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
 pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
