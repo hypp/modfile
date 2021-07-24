@@ -1377,23 +1377,23 @@ fn p61_putdata(stream:&mut dyn Read,packed_stream:&mut dyn Write) -> Result<(),E
 
 /// convert a packed p61 channel row to u32 for easy comparision
 /// used while searching for doing LZ77 style packing
-fn p61_fetchdata(packed_stream: &mut dyn Read) -> u32 {
+fn p61_fetchdata(packed_stream: &mut dyn Read) -> Result<u32,Error> {
 	let mut data:u32;
 	let mut tmp = [0u8];
 
-	packed_stream.read_exact(&mut tmp).unwrap();
+	packed_stream.read_exact(&mut tmp)?;
 	data = tmp[0] as u32;
 	let compression_flag = data & 0x80;
 	
 	if data & 0b01100000 != 0b01100000 {
 		// all
-		packed_stream.read_exact(&mut tmp).unwrap();
+		packed_stream.read_exact(&mut tmp)?;
 		data = data << 8 | tmp[0] as u32;
-		packed_stream.read_exact(&mut tmp).unwrap();
+		packed_stream.read_exact(&mut tmp)?;
 		data = data << 8 | tmp[0] as u32;
 		if compression_flag == 0x80 {
 			// read extra byte for compression
-			packed_stream.read_exact(&mut tmp).unwrap();
+			packed_stream.read_exact(&mut tmp)?;
 			data = data << 8 | tmp[0] as u32;
 		}
 	} else if data & 0b01110000 == 0b01100000 || 
@@ -1401,31 +1401,31 @@ fn p61_fetchdata(packed_stream: &mut dyn Read) -> u32 {
 		// onlycmd
 		// note and/or instrument
 		// these have the same length
-		packed_stream.read_exact(&mut tmp).unwrap();
+		packed_stream.read_exact(&mut tmp)?;
 		data = data << 8 | tmp[0] as u32;
 		if compression_flag == 0x80 {
 			// read extra byte for compression
-			packed_stream.read_exact(&mut tmp).unwrap();
+			packed_stream.read_exact(&mut tmp)?;
 			data = data << 8 | tmp[0] as u32;
 		}
 	} else {
 		// empty
 		if compression_flag == 0x80 {
 			// read extra byte for compression
-			packed_stream.read_exact(&mut tmp).unwrap();
+			packed_stream.read_exact(&mut tmp)?;
 			data = data << 8 | tmp[0] as u32;
 			if data & 0b11000000 == 0x40 {
 				// read extra byte for byte offset
-				packed_stream.read_exact(&mut tmp).unwrap();
+				packed_stream.read_exact(&mut tmp)?;
 			} else if data & 0b11000000 == 0xc0 {
 				// read extra bytes for word offset
-				packed_stream.read_exact(&mut tmp).unwrap();
-				packed_stream.read_exact(&mut tmp).unwrap();
+				packed_stream.read_exact(&mut tmp)?;
+				packed_stream.read_exact(&mut tmp)?;
 			} 
 		}
 	}
 
-	data
+	Ok(data)
 }
 
 
@@ -2433,7 +2433,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_p61_fetchdata() -> Result<(),()> {
+	fn test_p61_fetchdata() -> Result<(),Error> {
 
 		let mut encoded:Vec<u8> = Vec::new();
 
@@ -2455,60 +2455,60 @@ mod tests {
 		let mut cursor = Cursor::new(encoded);
 
 		// empty
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x7f);
 
 		// empty with compression
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xff23);
 
 		// Note only
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x7080);
 
 		// Note only and compression
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xf08084);
 
 
 		// Note and instrument
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x7087);
 
 		// Note and instrument and compression
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xf08708);
 
 		// Instrument only
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x7007);
 
 		// Instrument and compression
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xf00708);
 
 		// Effect only
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x6945);
 
 		// Effect only and compression
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xe94589);
 
 		// All data
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x187e23);
 
 		// All data and compression
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0x987e2384);
 
 		// 8 bit back reference
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xff60);
 
 		// 16 bit back reference
-		let res = p61_fetchdata(&mut cursor);
+		let res = p61_fetchdata(&mut cursor)?;
 		assert!(res == 0xffe0);
 
 		Ok(())
