@@ -1530,10 +1530,10 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 			let mut ch2 = pattern[2];
 			let mut ch3 = pattern[3];
 
-			let mut ch0_end = 0;
-			let mut ch1_end = 0;
-			let mut ch2_end = 0;
-			let mut ch3_end = 0;
+			let ch0_end;
+			let ch1_end;
+			let ch2_end;
+			let ch3_end;
 
 			if i+1 < pattern_offsets.len() {
 				let next_pattern = &pattern_offsets[i+1];
@@ -2518,8 +2518,7 @@ mod tests {
 
 }
 
-/// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
-pub fn qqqwrite_p61(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),PTMFError> {
+// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
 
 	// TODO 
 	// Magic bytes P61A
@@ -2548,5 +2547,3 @@ pub fn qqqwrite_p61(writer: &mut dyn Write, module: &mut PTModule) -> Result<(),
 
 	// Sample data
 	
-	Ok(())
-}
