@@ -1180,7 +1180,7 @@ fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 			6 if params == 0 => effect = 0x400,
 			5 | 6 | 0xA if params != 0 && param1 == 0 => effect &= 0xf0f,
 			5 | 6 | 0xA if params != 0 && param1 != 0 => {
-				let p = 0 - param2;
+				let p = !param1 + 1;
 				effect = (effect & 0xf00) | (p & 0xff);
 			},
 			8 => effect = 0xe80 | param2, // Effect 8 replaced with E8
