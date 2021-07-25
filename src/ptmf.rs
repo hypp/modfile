@@ -1684,90 +1684,70 @@ mod tests {
 	use std::io::BufWriter;
 	use std::io::BufReader;
 
-	fn load_module(infilename:String) -> Result<PTModule,()> {
-		let file = match File::open(&infilename) {
-			Ok(file) => file,
-			Err(e) => {
-				println!("Failed to open file: '{}' Error: '{}'", infilename, e);
-				return Err(())
-			}
-		};
+	fn load_module(infilename:String) -> Result<PTModule,PTMFError> {
+		let file = File::open(&infilename)?;
 		
 		let mut reader = BufReader::new(&file);
-		let module = match read_mod(&mut reader, true) {
-			Ok(module) => module,
-			Err(e) => {
-				println!("Failed to parse file: '{}' Error: '{:?}'", infilename, e);
-				return Err(())
-			}
-		};
+		let module = read_mod(&mut reader, true)?;
 
 		// Close file
 		drop(file);
 		Ok(module)
 	}
 
-	fn save_module(outfilename:String, module:PTModule) -> Result<(),()> {
-		let file = match File::create(&outfilename) {
-			Ok(file) => file,
-			Err(e) => {
-				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
-				return Err(())
-			}
-		};
+	fn save_module(outfilename:String, module:PTModule) -> Result<(),PTMFError> {
+		let file = File::create(&outfilename)?;
 
 		let mut writer = BufWriter::new(&file);		
-		match write_mod(&mut writer,&module) {
-			Ok(_) => Ok(()),
-			Err(e) => {
-				println!("Failed to write module {}. Error: '{:?}'", outfilename, e);
-				return Err(());
-			}
-		}
+		write_mod(&mut writer,&module)?;
+
+		Ok(())
 	}
 	
     #[test]
-    fn test_write_p61() -> Result<(),()> {
+    fn test_write_p61_spiderfunk() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
-		let infilename = format!("{}/{}",basedir, "incy-wincy.mod");
+		let infilename = format!("{}/testdata/{}",basedir, "spiderfunk.mod");
 		let mut module = load_module(infilename)?;
 
-		let outfilename = format!("{}/{}",basedir, "P61.test_write_p61.mod");
-		let file = match File::create(&outfilename) {
-			Ok(file) => file,
-			Err(e) => {
-				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
-				return Err(())
-			}
-		};
+		let mut created:Vec<u8> = Vec::new();
+		let mut writer = Cursor::new(&mut created);
 
-		let mut writer = BufWriter::new(&file);
-		let _res = match write_p61(&mut writer,&mut module) {
-			Ok(e) => e,
-			Err(e) => {
-				println!("Failed to open file: '{}' Error: '{:?}'", outfilename, e);
-				return Err(())
-			}
-		};
+		write_p61(&mut writer,&mut module)?;
 
-/*
-		let basedir = env!("CARGO_MANIFEST_DIR");
-		let infilename = format!("{}/{}",basedir, "P61.incy-wincy.mod");
-	
-		let file = File::open(&infilename)?;
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
+		let file = File::open(&p61filename)?;
 		let mut reader = BufReader::new(&file);
 		let mut data:Vec<u8> = Vec::new();
-		let data_size = reader.read_to_end(&mut data)?;
-		for i in 2..final_data.len() {
-			let correct = data[i];
-			let my = final_data[i];
-			if my != correct {
-				println!("error: my = {:x} correct = {:x} pos = {}",my,correct,i);
-				break;
-			}
-		}
-*/	
+		reader.read_to_end(&mut data)?;
+
+		assert!(created.len() == data.len());
+		assert!(created == data);
+
+		Ok(())
+    }
+
+    #[test]
+    fn test_write_p61_leftovers() -> Result<(),PTMFError> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "leftovers.mod");
+		let mut module = load_module(infilename)?;
+
+		let mut created:Vec<u8> = Vec::new();
+		let mut writer = Cursor::new(&mut created);
+
+		write_p61(&mut writer,&mut module)?;
+
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.leftovers.mod");
+		let file = File::open(&p61filename)?;
+		let mut reader = BufReader::new(&file);
+		let mut data:Vec<u8> = Vec::new();
+		reader.read_to_end(&mut data)?;
+
+		assert!(created.len() == data.len());
+		assert!(created == data);
 
 		Ok(())
     }
@@ -1775,7 +1755,7 @@ mod tests {
 	#[test]
 	fn test_read_p61() -> Result<(),()> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
-		let infilename = format!("{}/{}",basedir, "P61.incy-wincy.mod");
+		let infilename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
 
 		let file = match File::open(&infilename) {
 			Ok(file) => file,
@@ -1797,12 +1777,11 @@ mod tests {
 		// Close file
 		drop(file);
 
-//		let samples = module.sample_info.iter().filter(|si| si.length > 0);
-//		let num_samples = samples.count();
-//		assert!(num_samples == 18);
-//		assert!(module.sample_info.len() == 31);
-//		assert!(module.length == 25);
-//		assert!(module.patterns.len() == 13);
+		let samples = module.sample_info.iter().filter(|si| si.length > 0);
+		let num_samples = samples.count();
+		assert!(num_samples == 0xd);
+		assert!(module.length == 25);
+		assert!(module.patterns.len() == 0xd);
 
 		Ok(())
 	}
@@ -1938,7 +1917,7 @@ mod tests {
 	}
 
     #[test]
-	fn test_find_duplicate_patterns() -> Result<(),()> {
+	fn test_find_duplicate_patterns() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "duplicate_patterns.mod");
@@ -1952,7 +1931,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_duplicate_patterns() -> Result<(),()> {
+	fn test_remove_duplicate_patterns() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "duplicate_patterns.mod");
@@ -1968,7 +1947,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_all_used() -> Result<(),()> {
+	fn test_find_unused_samples_all_used() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "all_used_samples.mod");
@@ -1981,7 +1960,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_no_used() -> Result<(),()> {
+	fn test_find_unused_samples_no_used() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "no_used_samples.mod");
@@ -1994,7 +1973,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_1() -> Result<(),()> {
+	fn test_find_unused_samples_1() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1.mod");
@@ -2008,7 +1987,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_2() -> Result<(),()> {
+	fn test_find_unused_samples_2() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_2.mod");
@@ -2022,7 +2001,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_3() -> Result<(),()> {
+	fn test_find_unused_samples_3() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_3.mod");
@@ -2036,7 +2015,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_1d() -> Result<(),()> {
+	fn test_find_unused_samples_1d() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1d.mod");
@@ -2050,7 +2029,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_1e() -> Result<(),()> {
+	fn test_find_unused_samples_1e() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1e.mod");
@@ -2064,7 +2043,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_unused_samples_1f() -> Result<(),()> {
+	fn test_find_unused_samples_1f() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1f.mod");
@@ -2078,7 +2057,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_unused_samples_all_used() -> Result<(),()> {
+	fn test_remove_unused_samples_all_used() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "all_used_samples.mod");
@@ -2097,7 +2076,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_unused_samples_no_used() -> Result<(),()> {
+	fn test_remove_unused_samples_no_used() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "no_used_samples.mod");
@@ -2116,7 +2095,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_unused_samples_1() -> Result<(),()> {
+	fn test_remove_unused_samples_1() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "unused_samples_1.mod");
@@ -2135,7 +2114,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_duplicate_samples_same_sample() -> Result<(),()> {
+	fn test_find_duplicate_samples_same_sample() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "same_sample.mod");
@@ -2149,7 +2128,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_duplicate_samples_same_sample_ft() -> Result<(),()> {
+	fn test_find_duplicate_samples_same_sample_ft() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "same_sample_ft.mod");
@@ -2163,7 +2142,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_duplicate_samples_same_sample_rep() -> Result<(),()> {
+	fn test_find_duplicate_samples_same_sample_rep() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "same_sample_rep.mod");
@@ -2177,7 +2156,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_duplicate_samples_same_sample() -> Result<(),()> {
+	fn test_remove_duplicate_samples_same_sample() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "same_sample.mod");
@@ -2196,7 +2175,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_duplicate_samples_same_sample_ft() -> Result<(),()> {
+	fn test_remove_duplicate_samples_same_sample_ft() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "same_sample_ft.mod");
@@ -2215,7 +2194,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_remove_duplicate_samples_same_sample_rep() -> Result<(),()> {
+	fn test_remove_duplicate_samples_same_sample_rep() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "same_sample_rep.mod");
@@ -2234,7 +2213,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_truncate_samples() -> Result<(),()> {
+	fn test_truncate_samples() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "truncate_samples.mod");
@@ -2255,7 +2234,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_truncate_patterns() -> Result<(),()> {
+	fn test_truncate_patterns() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
 
 		let infilename = format!("{}/testdata/{}",basedir, "truncate_patterns.mod");
