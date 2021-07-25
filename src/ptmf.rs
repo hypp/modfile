@@ -1559,16 +1559,15 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 					stream_cursor.set_position(consumed_pos);
 
 					// calc pointer
-					let mut delta =  current_packed_stream_pos - longest_match_pos;
+					let mut delta =  current_packed_stream_pos - longest_match_pos + 3;
 					if delta < 256 {
 						// 8 bit pointer
-						delta += 3;
 						packed_stream_cursor.write_all(&[0xff])?;
 						packed_stream_cursor.write_all(&[0b01000000 | longest_match_count-1])?;
 						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
 					} else {
 						// 16 bit pointer
-						delta += 4;
+						delta += 1;
 						packed_stream_cursor.write_all(&[0xff])?;
 						packed_stream_cursor.write_all(&[0b11000000 | longest_match_count-1])?;
 						packed_stream_cursor.write_all(&[((delta >> 8) & 0xff) as u8])?;
