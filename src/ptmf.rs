@@ -5,6 +5,7 @@ use std::io::Error;
 use std::fs::File;
 use std::io::BufWriter;
 use std::io::BufReader;
+use std::io::copy;
 
 use std::fmt;
 use std::cmp;
@@ -424,6 +425,15 @@ impl PTModule {
 				}
 
 				si.data.truncate(repeat_end);
+			} else {
+				// The Player removes trailing 0
+				// but only complete word
+				while si.data.len() > 2 && 
+					si.data[si.data.len()-1] == 0 && 
+					si.data[si.data.len()-2] == 0 {
+					si.data.pop();
+					si.data.pop();
+				}
 			}
 		}
 	}
@@ -1109,7 +1119,6 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	module.length = length as u8;
 	
 	let pattern_start_offset = pos;
-	println!("patterndata address: {:X}",pattern_start_offset);
 	
 	// Pop removes from the end of Vec
 	pattern_offsets.reverse();
@@ -1355,7 +1364,6 @@ fn p61_fetchdata(packed_stream: &mut dyn Read) -> Result<u32,Error> {
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
 pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
-	// TODO fail if not 4 channels
 	if module.num_channels != 4 {
 		return Err(PTMFError::Parse(format!("Error! Only supported for 4 channels. This module has '{}' channels", module.num_channels)));
 	}
@@ -1456,82 +1464,6 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		pattern_offsets[0][2],
 		pattern_offsets[0][3],
 		stream.len()]);
-
-	let verbose = true;
-	if verbose {
-		println!("pattern_offsets: {:?}",pattern_offsets);
-		for i in 0..pattern_offsets.len() {
-			println!("***** Pattern {}",i);
-			let pattern = &pattern_offsets[i];
-
-			let mut ch0 = pattern[0];
-			let mut ch1 = pattern[1];
-			let mut ch2 = pattern[2];
-			let mut ch3 = pattern[3];
-
-			let ch0_end;
-			let ch1_end;
-			let ch2_end;
-			let ch3_end;
-
-			// TODO remove this
-			if i+1 < pattern_offsets.len() {
-				let next_pattern = &pattern_offsets[i+1];
-
-				ch0_end = next_pattern[0];
-				ch1_end = next_pattern[1];
-				ch2_end = next_pattern[2];
-				ch3_end = next_pattern[3];
-		
-			} else {
-				let first_pattern = &pattern_offsets[0];
-
-				ch0_end = first_pattern[1];
-				ch1_end = first_pattern[2];
-				ch2_end = first_pattern[3];
-				ch3_end = stream.len();
-			};
-
-			let mut wrote_something = true;
-			while wrote_something {
-				wrote_something = false;
-
-				if ch0 < ch0_end {
-					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch0],stream[ch0+1],stream[ch0+2],stream[ch0+3]);
-					wrote_something = true;
-				} else {
-					print!(".. .. .. ..    ");
-				}
-
-				if ch1 < ch1_end {
-					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch1],stream[ch1+1],stream[ch1+2],stream[ch1+3]);
-					wrote_something = true;
-				} else {
-					print!(".. .. .. ..    ");
-				}
-
-				if ch2 < ch2_end {
-					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch2],stream[ch2+1],stream[ch2+2],stream[ch2+3]);
-					wrote_something = true;
-				} else {
-					print!(".. .. .. ..    ");
-				}
-
-				if ch3 < ch3_end {
-					print!("{:2x} {:2x} {:2x} {:2x}    ",stream[ch3],stream[ch3+1],stream[ch3+2],stream[ch3+3]);
-					wrote_something = true;
-				} else {
-					print!(".. .. .. ..    ");
-				}
-				println!();
-
-				ch0 += 4;
-				ch1 += 4;
-				ch2 += 4;
-				ch3 += 4;
-			}
-		}
-	}
 
 	let mut packed_pattern_offsets:Vec<Vec<usize>> = Vec::new();
 	let mut packed_stream:Vec<u8> = Vec::new();
@@ -1647,43 +1579,99 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		} // for pattern_idx 
 	} // for channel_idx
 
-	if verbose {
-		println!("************");
-		println!("packed_pattern_offsets: {:?}",packed_pattern_offsets);
-		println!("packed stream length: {}",packed_stream.len());
-		let mut column = 0;
-		for i in 0..packed_stream.len() {
-			if column % 16 == 0 {
-				println!();
-				print!("{} => {:2x}",i,packed_stream[i]);
-			} else {
-				print!(" {:2x}",packed_stream[i]);
-			}
-	
-			column += 1;
-		}
-	
-		println!();	
-	}
-
-	let basedir = env!("CARGO_MANIFEST_DIR");
-	let infilename = format!("{}/{}",basedir, "P61.incy-wincy.mod");
-
-	let file = File::open(&infilename)?;
-	let mut reader = BufReader::new(&file);
-	let mut data:Vec<u8> = Vec::new();
-	let data_size = reader.read_to_end(&mut data)?;
-	for i in 0..packed_stream.len() {
-		let correct = data[0x2ca + i];
-		let my = packed_stream[i];
-		if my != correct {
-			println!("error: my = {:x} correct = {:x} pos = {}",my,correct,i);
-			break;
-		}
-	}
-
 	// Then we write it
+	let mut final_data:Vec<u8> = Vec::new();
+	let mut final_data_cursor = Cursor::new(&mut final_data);
 
+	// optional P61A
+	// TODO add as an optional parameter
+
+	// sample data offset u16
+	// we don't know this until we have written
+	// all the other data
+	let sample_offset_position = final_data_cursor.position();
+	write_big_endian_u16(&mut final_data_cursor, 0)?;
+
+
+	// number of patterns u8
+	write_u8(&mut final_data_cursor, workmodule.patterns.len() as u8)?;
+	
+	// number of samples u8 6 bits, 0x80 means 8 bit delta packed, 0x40 means 4 bit delta packed
+	// TODO add sample delta packing
+	write_u8(&mut final_data_cursor, workmodule.sample_info.len() as u8)?;
+
+	// optional unpacked sample length u32 for 4 bit delta packed samples
+	// TODO add sample delta packing
+
+	// for each sample
+	// sample length u16, or negative index to another sample for using the same sample data
+	// finetune u8, hi bit 0x80 means sample is 4 bit delta packed
+	// volume u8
+	// repeat start u16 or 0xffff u16
+	for si in &workmodule.sample_info {
+		// length in words
+		let sample_length = si.data.len() as u16 / 2;
+		write_big_endian_u16(&mut final_data_cursor, sample_length)?;
+		write_u8(&mut final_data_cursor, si.finetune)?;
+		write_u8(&mut final_data_cursor, si.volume)?;
+		let repeat_start = if si.repeat_length > 1 {
+			si.repeat_start
+		} else {
+			0xffff
+		};
+		write_big_endian_u16(&mut final_data_cursor, repeat_start)?;
+	}
+
+	// for each pattern
+	// ch1 pattern offset u16
+	// ch2 pattern offset u16
+	// ch3 pattern offset u16
+	// ch4 pattern offset u16
+	for offsets in packed_pattern_offsets {
+		write_big_endian_u16(&mut final_data_cursor, offsets[0] as u16)?;
+		write_big_endian_u16(&mut final_data_cursor, offsets[1] as u16)?;
+		write_big_endian_u16(&mut final_data_cursor, offsets[2] as u16)?;
+		write_big_endian_u16(&mut final_data_cursor, offsets[3] as u16)?;
+	}
+
+	// for each play position
+	// position u8
+	for idx in 0..workmodule.length as usize {
+		let position = workmodule.positions.data[idx];
+		write_u8(&mut final_data_cursor, position)?;
+	}
+
+	// end of positions
+	// 0xff u8
+	write_u8(&mut final_data_cursor, 0xff)?;
+
+	// compressed pattern data
+	let mut packed_stream_cursor = Cursor::new(&mut packed_stream);
+	packed_stream_cursor.set_position(0);
+	copy(&mut packed_stream_cursor,&mut final_data_cursor)?;
+
+	// padding 0-1 u8
+	if final_data_cursor.position() % 2 == 1 {
+		write_u8(&mut final_data_cursor, 0)?;
+	}
+
+	let sample_offset = final_data_cursor.position();
+	final_data_cursor.set_position(sample_offset_position);
+	write_big_endian_u16(&mut final_data_cursor, sample_offset as u16)?;
+	final_data_cursor.set_position(sample_offset);
+
+	// TODO optional separate file for samples
+
+	// for each sample 
+	// sample data
+	for si in &workmodule.sample_info {
+		// TODO check that sample length is even
+		let mut sample_cursor = Cursor::new(&si.data);
+		copy(&mut sample_cursor, &mut final_data_cursor)?;
+	}
+
+	final_data_cursor.set_position(0);
+	copy(&mut final_data_cursor,writer)?;
 
 	Ok(())
 }
@@ -1763,6 +1751,25 @@ mod tests {
 				return Err(())
 			}
 		};
+
+/*
+		let basedir = env!("CARGO_MANIFEST_DIR");
+		let infilename = format!("{}/{}",basedir, "P61.incy-wincy.mod");
+	
+		let file = File::open(&infilename)?;
+		let mut reader = BufReader::new(&file);
+		let mut data:Vec<u8> = Vec::new();
+		let data_size = reader.read_to_end(&mut data)?;
+		for i in 2..final_data.len() {
+			let correct = data[i];
+			let my = final_data[i];
+			if my != correct {
+				println!("error: my = {:x} correct = {:x} pos = {}",my,correct,i);
+				break;
+			}
+		}
+*/	
+
 		Ok(())
     }
 
