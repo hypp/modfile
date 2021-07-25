@@ -2,9 +2,6 @@ use std::io::Write;
 use std::io::Read;
 use std::io::Cursor;
 use std::io::Error;
-use std::fs::File;
-use std::io::BufWriter;
-use std::io::BufReader;
 use std::io::copy;
 
 use std::fmt;
@@ -2571,33 +2568,3 @@ mod tests {
 
 
 }
-
-// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
-
-	// TODO 
-	// Magic bytes P61A
-	// Offset to samples
-	// Number of patterns
-	// Number of samples + bits for sample packing
-	// Optional unpacked sample length
-
-	// For each sample
-	// Sample length
-	// Finetune + bit for sample packing
-	// Volume
-	// Repeat start
-	
-	// For each pattern and each channel
-	// Offset to channel data start
-	
-	// Pattern play order
-	// Byte sequence terminated by $ff
-	
-	// Pattern data
-	
-	// Loop through all patterns channel by channel
-	// Encode as The Player, keep track of pattern breaks and pattern jumps
-	
-
-	// Sample data
-	
