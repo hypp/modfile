@@ -2,6 +2,10 @@ use std::io::Write;
 use std::io::Read;
 use std::io::Cursor;
 use std::io::Error;
+use std::fs::File;
+use std::io::BufWriter;
+use std::io::BufReader;
+
 use std::fmt;
 use std::cmp;
 use std::io;
@@ -428,7 +432,7 @@ impl PTModule {
 		for pattern in &mut self.patterns {
 			let mut found = false;
 			for i in 0..pattern.rows.len() {
-				for channel in &pattern.rows[i].channels {
+				for channel in &mut pattern.rows[i].channels {
 					let effect = (channel.effect & 0xf00) >> 8;
 					if effect == 0xd || effect == 0xb {
 						found = true;
@@ -439,6 +443,26 @@ impl PTModule {
 				if found {
 					pattern.rows.truncate(i+1);
 					break;
+				}
+			} // for rows
+		} // for patterns
+	}
+
+	pub fn remove_duplicate_breaks(&mut self) {
+		for pattern in &mut self.patterns {
+			let mut found = false;
+			for i in 0..pattern.rows.len() {
+				for channel in &mut pattern.rows[i].channels {
+					let effect = (channel.effect & 0xf00) >> 8;
+					if effect == 0xd || effect == 0xb {
+						if found  {
+							// already found in another channel
+							// remove it
+							channel.effect = 0;
+						} else {
+							found = true;
+						}
+					}
 				}
 			} // for rows
 		} // for patterns
@@ -1332,15 +1356,23 @@ fn p61_fetchdata(packed_stream: &mut dyn Read) -> Result<u32,Error> {
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
 pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
 	// TODO fail if not 4 channels
+	if module.num_channels != 4 {
+		return Err(PTMFError::Parse(format!("Error! Only supported for 4 channels. This module has '{}' channels", module.num_channels)));
+	}
 
 	let mut workmodule = module.clone();
 
 	// Prepare all data first
 	workmodule.truncate_samples();
-	workmodule.remove_duplicate_samples();
+	// To generate binary identical files,
+	// we have to leave duplicate samples
+	//workmodule.remove_duplicate_samples();
 	workmodule.remove_unused_samples();
 	workmodule.truncate_patterns();
-	workmodule.remove_duplicate_patterns();
+	workmodule.remove_duplicate_breaks();
+	// to generate binary identical files
+	// we have to leave duplicate patterns
+	//workmodule.remove_duplicate_patterns();
 	workmodule.remove_unused_patterns();
 
 
@@ -1418,7 +1450,14 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		} // for pattern_idx
 	} // for channel_idx
 
-	let verbose = false;
+	// add an extra row with end offsets for each channel
+	pattern_offsets.push(vec![
+		pattern_offsets[0][1],
+		pattern_offsets[0][2],
+		pattern_offsets[0][3],
+		stream.len()]);
+
+	let verbose = true;
 	if verbose {
 		println!("pattern_offsets: {:?}",pattern_offsets);
 		for i in 0..pattern_offsets.len() {
@@ -1435,6 +1474,7 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 			let ch2_end;
 			let ch3_end;
 
+			// TODO remove this
 			if i+1 < pattern_offsets.len() {
 				let next_pattern = &pattern_offsets[i+1];
 
@@ -1491,27 +1531,156 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 				ch3 += 4;
 			}
 		}
-	//	println!("stream:");
-	//	for i in (0..stream.len()).step_by(4) {
-	//		println!("{:x} {:x} {:x} {:x}",stream[i],stream[i+1],stream[i+2],stream[i+3]);
-	//	}
 	}
 
-	let mut read_offset = 0;
+	let mut packed_pattern_offsets:Vec<Vec<usize>> = Vec::new();
 	let mut packed_stream:Vec<u8> = Vec::new();
-	p61_putdata(&mut &stream[..], &mut packed_stream).unwrap();
-	read_offset += 4;
 
-	println!("{:2x} {:2x} {:2x} {:2x}", stream[read_offset-4]+0, stream[read_offset-4+1],stream[read_offset-4]+2,stream[read_offset-4]+3);
-	let write_offset = packed_stream.len();
-	println!("=> {:2x} {:2x} {:2x} {:2x}", packed_stream[write_offset-4]+0, packed_stream[write_offset-4+1],packed_stream[write_offset-4]+2,packed_stream[write_offset-4]+3);
+	let mut stream_cursor = Cursor::new(stream);
+	let mut packed_stream_cursor = Cursor::new(&mut packed_stream);
 
-	p61_putdata(&mut &stream[4..], &mut packed_stream).unwrap();
-	read_offset += 4;
+	let mut first = true;
+	for channel_idx in 0..4 {
+		for pattern_idx in 0..workmodule.patterns.len() {
+			// Save offset for this channel and this pattern
+			if packed_pattern_offsets.len() == pattern_idx {
+				packed_pattern_offsets.push(vec![0; 4]);
+			}
+			packed_pattern_offsets[pattern_idx][channel_idx] = packed_stream_cursor.position() as usize;
 
-	println!("{:2x} {:2x} {:2x} {:2x}", stream[read_offset-4]+0, stream[read_offset-4+1],stream[read_offset-4]+2,stream[read_offset-4]+3);
-	let write_offset = packed_stream.len();
-	println!("=> {:2x} {:2x} {:2x} {:2x}", packed_stream[write_offset-4]+0, packed_stream[write_offset-4+1],packed_stream[write_offset-4]+2,packed_stream[write_offset-4]+3);
+			let channel_end_offset = pattern_offsets[pattern_idx+1][channel_idx] as u64;
+			while stream_cursor.position() < channel_end_offset {
+				if first {
+					first = false;
+					// First time is special and can not be compressed
+					p61_putdata(&mut stream_cursor, &mut packed_stream_cursor)?;
+					continue;
+				}
+
+				// save current positions
+				let current_packed_stream_pos = packed_stream_cursor.position();
+
+				// Write current value to stream
+				p61_putdata(&mut stream_cursor, &mut packed_stream_cursor)?;
+
+				// get it back for comparison
+				packed_stream_cursor.set_position(current_packed_stream_pos);
+				let current_value = p61_fetchdata(&mut packed_stream_cursor)?;
+
+				let mut search_cursor = Cursor::new(packed_stream_cursor.get_ref());
+				search_cursor.set_position(0);
+				let mut src_cursor = Cursor::new(stream_cursor.get_ref());
+
+				let mut longest_match_pos = 0;
+				let mut longest_match_count = 0;
+				let mut consumed_pos = 0;
+				let mut found_match = false;
+				while search_cursor.position() < current_packed_stream_pos {
+					let mut tmp_area = Vec::new();
+					let mut tmp_cursor = Cursor::new(&mut tmp_area);
+	
+					let search_position = search_cursor.position();
+
+					let existing_value = p61_fetchdata(&mut search_cursor)?;
+
+					if current_value == existing_value {
+						// Match
+						let mut match_count = 1;
+
+						// Keep searching
+						src_cursor.set_position(stream_cursor.position());
+
+						while src_cursor.position() <  channel_end_offset && 
+								search_cursor.position() < current_packed_stream_pos {
+							// decode next src
+							tmp_cursor.set_position(0);
+							p61_putdata(&mut src_cursor, &mut tmp_cursor)?;
+							tmp_cursor.set_position(0);
+							let src_value = p61_fetchdata(&mut tmp_cursor)?;
+
+							let search_value = p61_fetchdata(&mut search_cursor)?;
+
+							if src_value == search_value {
+								match_count += 1;
+							} else {
+								src_cursor.set_position(src_cursor.position()-4);
+								break;
+							}
+						}
+
+						if match_count > 1 && match_count > longest_match_count {
+							found_match = true;
+							longest_match_count = match_count;
+							longest_match_pos = search_position;
+							consumed_pos = src_cursor.position();
+						}
+
+
+					} // if match
+	
+				} // while search
+
+				if found_match {
+					// Rewind stream
+					packed_stream_cursor.set_position(current_packed_stream_pos);
+					// Jump forward in stream
+					stream_cursor.set_position(consumed_pos);
+
+					// calc pointer
+					let mut delta =  current_packed_stream_pos - longest_match_pos;
+					if delta < 256 {
+						// 8 bit pointer
+						delta += 3;
+						packed_stream_cursor.write_all(&[0xff])?;
+						packed_stream_cursor.write_all(&[0b01000000 | longest_match_count-1])?;
+						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
+					} else {
+						// 16 bit pointer
+						delta += 4;
+						packed_stream_cursor.write_all(&[0xff])?;
+						packed_stream_cursor.write_all(&[0b11000000 | longest_match_count-1])?;
+						packed_stream_cursor.write_all(&[((delta >> 8) & 0xff) as u8])?;
+						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
+					}
+				} // if found_match
+			} // stream_cursor.position() < channel_end_offset
+		} // for pattern_idx 
+	} // for channel_idx
+
+	if verbose {
+		println!("************");
+		println!("packed_pattern_offsets: {:?}",packed_pattern_offsets);
+		println!("packed stream length: {}",packed_stream.len());
+		let mut column = 0;
+		for i in 0..packed_stream.len() {
+			if column % 16 == 0 {
+				println!();
+				print!("{} => {:2x}",i,packed_stream[i]);
+			} else {
+				print!(" {:2x}",packed_stream[i]);
+			}
+	
+			column += 1;
+		}
+	
+		println!();	
+	}
+
+	let basedir = env!("CARGO_MANIFEST_DIR");
+	let infilename = format!("{}/{}",basedir, "P61.incy-wincy.mod");
+
+	let file = File::open(&infilename)?;
+	let mut reader = BufReader::new(&file);
+	let mut data:Vec<u8> = Vec::new();
+	let data_size = reader.read_to_end(&mut data)?;
+	for i in 0..packed_stream.len() {
+		let correct = data[0x2ca + i];
+		let my = packed_stream[i];
+		if my != correct {
+			println!("error: my = {:x} correct = {:x} pos = {}",my,correct,i);
+			break;
+		}
+	}
 
 	// Then we write it
 
