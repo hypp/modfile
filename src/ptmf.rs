@@ -1174,6 +1174,261 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	Ok(module)
 }
 
+/// Read an Amiga ProTracker file packed with The Player 6.1
+pub fn analyze_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
+	let mut module = PTModule::new();
+	module.num_channels = DEFAULT_NUMBER_OF_CHANNELS_PER_ROW;
+	
+	// Read the entire file to a Vec<u8>
+	// since the format uses a lot of offsets
+	// back and forth in the file.
+	let mut data:Vec<u8> = Vec::new();
+	let data_size = reader.read_to_end(&mut data)?;
+	if data.len() != data_size {
+		return Err(PTMFError::Parse(format!("Failed to read all bytes {} {}", data.len(), data_size)));	
+	}
+	
+	let mut pos = 0;
+
+	if data[0] == 'P' as u8 && 
+		data[1] == '6' as u8 &&
+		data[2] == '1' as u8 &&
+		data[3] == 'A' as u8 {
+		println!("has header");
+		// Remove header
+		data.remove(0);
+		data.remove(0);
+		data.remove(0);
+		data.remove(0);
+	}
+
+	let sample_offset = ((data[pos] as u16) << 8) | data[pos+1] as u16;
+	let num_patterns = data[pos+2];
+	println!("number of patterns {}",num_patterns);
+	let num_samples = data[pos+3];
+	pos += 4;
+	
+	let is_delta_8_bit = num_samples & 0x80 == 0x80;
+	let is_delta_4_bit = num_samples & 0x40 == 0x40;
+	let num_samples = num_samples & 0b00111111;
+
+	println!("number of samples {} 8 bit delta packing {} 4 bit delta packing {}",num_samples,is_delta_8_bit,is_delta_4_bit);
+	
+	let mut unpacked_samples_length:u32 = 0; 
+	if is_delta_4_bit {
+		for _ in 0..4 {
+			unpacked_samples_length = (unpacked_samples_length << 8) + data[pos] as u32;
+			pos += 1;
+		}
+		println!("unpacked sample length {}",unpacked_samples_length);
+	}
+	
+	println!("samples:");
+	let mut sample_start = sample_offset as usize;
+	for i in 0..num_samples as usize {
+		module.sample_info.push(SampleInfo::new());
+		let sample_length = ((data[pos] as u16) << 8) | data[pos+1] as u16;
+		let finetune = data[pos+2];
+		let volume = data[pos+3];
+		let mut repeat_start = ((data[pos+4] as u16) << 8) | data[pos+5] as u16;
+		let mut repeat_length = 0;
+		if repeat_start == 0xffff {
+			repeat_start = 0;
+		} else {
+			repeat_length = sample_length - repeat_start;
+		}
+		
+		println!("  sample length {} finetune {} volume {} repeat start {} repeat length {}",sample_length,finetune,volume,repeat_start,repeat_length);
+
+		let signed_sample_length = sample_length as i16;
+		if signed_sample_length < 0 && signed_sample_length >= -31 {
+			// This means that the sample uses the same sample data as
+			// another sample
+			let sample_index = (-1 * signed_sample_length - 1) as usize;
+			
+			let length = module.sample_info[sample_index].length;
+			let data = module.sample_info[sample_index].data.clone();
+
+			// Fix repeat length
+			if repeat_start == 0xffff {
+				repeat_start = 0;
+			} else {
+				repeat_length = length - repeat_start;
+			}
+			
+			let si = &mut module.sample_info[i];
+			si.length = length;
+			si.finetune = finetune & 0x0f;
+			si.volume = volume;
+			si.repeat_start = repeat_start;
+			si.repeat_length = repeat_length;
+			si.data = data;
+
+		} else {
+		
+			let is_sample_delta_4_bit = finetune & 0x80 == 0x80;
+		
+			let si = &mut module.sample_info[i];
+			si.length = sample_length;
+			si.finetune = finetune & 0x0f;
+			si.volume = volume;
+			si.repeat_start = repeat_start;
+			si.repeat_length = repeat_length;
+
+			// 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
+			// It is possible to combine 8-bit and 4-bit delta
+			if is_delta_4_bit && is_sample_delta_4_bit {
+				let sample_end = sample_start + sample_length as usize; // Packed length is half of unpacked length
+				let mut delta:u8 = 0;
+				for i in sample_start..sample_end {
+					let hi = ((data[i] & 0xf0) >> 4) as usize;
+					let lo = (data[i] & 0x0f) as usize;
+					let subhi = DELTA_4BIT[hi];
+					delta = (Wrapping(delta) - Wrapping(subhi)).0;
+					si.data.push(delta);
+					let sublo = DELTA_4BIT[lo];
+					delta = (Wrapping(delta) - Wrapping(sublo)).0;
+					si.data.push(delta);				
+				}
+				
+				// Move to next sample
+				sample_start = sample_end;
+				
+			} else if is_delta_8_bit {
+				let sample_end = sample_start + (sample_length as usize) * 2;
+				let mut delta:u8 = data[sample_start];
+				// First byte get copied unmodified
+				si.data.push(delta);
+				
+				for i in sample_start+1..sample_end {
+					delta = (Wrapping(delta) - Wrapping(data[i])).0;
+					si.data.push(delta);
+				}
+				
+				// Move to next sample
+				sample_start = sample_end;
+			
+			} else {
+				let sample_end = sample_start + (sample_length as usize) * 2;
+				let sample_data = &data[sample_start..sample_end];
+				si.data = sample_data.to_vec();
+
+				// Move to next sample
+				sample_start = sample_end;
+				
+			}
+		}
+		
+		// Move to next sample
+		pos = pos+6;
+	}
+	
+	let mut offset_pos = pos;
+	let mut pattern_offsets:Vec<usize> = Vec::new();
+	for _ in 0..num_patterns {
+		module.patterns.push(Pattern::new(DEFAULT_NUMBER_OF_ROWS_PER_PATTERN, DEFAULT_NUMBER_OF_CHANNELS_PER_ROW));
+		for _ in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+			let offset = (((data[pos] as u16) << 8) | data[pos+1] as u16) as usize;
+			pattern_offsets.push(offset);
+			
+			pos += 2;
+		}
+	}
+	
+	println!("positions:");
+	print!("  ");
+	let mut length = 0;
+	loop {
+		let position = data[pos];
+		if position == 0xff {
+			break;
+		}
+		module.positions.data[length] = position;
+		print!("{} ", position);
+		
+		length += 1;
+		pos += 1;
+	}
+	println!();
+	
+	pos += 1;
+
+	module.length = length as u8;
+	
+	let pattern_start_offset = pos;
+
+	println!("offsets:");
+	for i in 0..num_patterns {
+		print!("  {}: ",i);
+		for _ in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW {
+			let offset = (((data[offset_pos] as u16) << 8) | data[offset_pos+1] as u16) as usize + pattern_start_offset;
+
+			print!("{:02x}({})  ",offset,offset);
+			
+			offset_pos += 2;
+		}
+		println!();
+	}
+
+
+	
+	// Pop removes from the end of Vec
+	pattern_offsets.reverse();
+	
+	for pattern_number in 0..num_patterns as usize {
+	
+		let mut row_number = [0usize; DEFAULT_NUMBER_OF_CHANNELS_PER_ROW];
+		let mut current_pos = [0usize; DEFAULT_NUMBER_OF_CHANNELS_PER_ROW];
+		
+		for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+			row_number[channel_number] = 0;
+			current_pos[channel_number] = pattern_start_offset + pattern_offsets.pop().unwrap();
+		}
+		
+		let mut truncate_pos = DEFAULT_NUMBER_OF_ROWS_PER_PATTERN;
+		loop {
+			
+			// We always need to decode the channel with the lowest row number first
+			// to see if it contains a pattern break or jump
+			
+			let mut current_channel = 0;
+			let mut lowest = DEFAULT_NUMBER_OF_ROWS_PER_PATTERN;
+			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+				if row_number[channel_number] < lowest {
+					lowest = row_number[channel_number];
+					current_channel = channel_number;
+				}
+			}
+			
+			if lowest >= truncate_pos {
+				break;
+			}
+
+//			println!("P {} C {} R {} P {:X}",pattern_number,current_channel,row_number[current_channel],current_pos[current_channel]);
+			let eop = decode_p61_row(&data, &mut current_pos[current_channel], pattern_number, &mut row_number[current_channel], current_channel, &mut module);				
+			if eop {
+				// This will make sure we exit the while loop early
+				// but still process any remaining channels
+				truncate_pos = row_number[current_channel];
+			}
+						
+		} // loop
+		
+		// If we exit the while loop early above, make sure that we clear out any data
+		// that we parsed but shouldn't really be there
+		for row_number in truncate_pos..DEFAULT_NUMBER_OF_ROWS_PER_PATTERN as usize {
+			for channel_number in 0..DEFAULT_NUMBER_OF_CHANNELS_PER_ROW as usize {
+				let channel = &mut module.patterns[pattern_number].rows[row_number].channels[channel_number];
+				channel.period = 0;
+				channel.sample_number = 0;
+				channel.effect = 0;
+			}
+		}		
+	}
+
+	Ok(module)
+}
+
 fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 	let mut data:Vec<u8> = Vec::new();
 
