@@ -1754,83 +1754,163 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 
 				// get it back for comparison
 				packed_stream_cursor.set_position(current_packed_stream_pos);
-				let current_value = p61_fetchdata(&mut packed_stream_cursor)?;
+				let first_src_value = p61_fetchdata(&mut packed_stream_cursor)?;
 
 				let mut search_cursor = Cursor::new(packed_stream_cursor.get_ref());
 				search_cursor.set_position(0);
-				let mut src_cursor = Cursor::new(stream_cursor.get_ref());
 
-				let mut longest_match_pos = 0;
-				let mut longest_match_count = 0;
-				let mut consumed_pos = 0;
-				let mut found_match = false;
+				let mut best_match = false;
+				let mut best_match_offset = 0;
+				let mut best_match_length = 0;
+				let mut best_match_length_bytes = 0;
+				let mut best_match_cursor = 0;
 				while search_cursor.position() < current_packed_stream_pos {
+					// save start of search position
+					// this is used to calculate the number of
+					// compressed bytes
+					let start_search_pos = search_cursor.position();
+
+					// fetch one value from compressed stream
+					let first_compressed_value = p61_fetchdata(&mut search_cursor)?;
+
+					if first_src_value != first_compressed_value {
+						// this does not match, keep searching
+						continue;
+					}
+
+					// save this position and reset stream here
+					// before next search
+					let next_search_pos = search_cursor.position();
+
+					// ok, the first one matched
+					let mut src_cursor = Cursor::new(stream_cursor.get_ref());
+					src_cursor.set_position(stream_cursor.position());
+
+					if src_cursor.position() >= channel_end_offset {
+						// end of unpacked data for this channel and pattern
+						// no point in continuing searching
+						break;
+					}
+
+					if search_cursor.position() >= current_packed_stream_pos {
+						// end of packed data
+						// no point in continuing searching
+						break;
+					}
+
 					let mut tmp_area = Vec::new();
 					let mut tmp_cursor = Cursor::new(&mut tmp_area);
-	
-					let search_position = search_cursor.position();
 
-					let existing_value = p61_fetchdata(&mut search_cursor)?;
+					// fetch next value from uncompressed stream
+					tmp_cursor.set_position(0);
+					p61_putdata(&mut src_cursor, &mut tmp_cursor)?;
+					tmp_cursor.set_position(0);
+					let second_src_value = p61_fetchdata(&mut tmp_cursor)?;
 
-					if current_value == existing_value {
-						// Match
-						let mut match_count = 1;
+					// fetch one value from compressed stream
+					let second_compressed_value = p61_fetchdata(&mut search_cursor)?;
 
-						// Keep searching
-						src_cursor.set_position(stream_cursor.position());
+					if second_src_value != second_compressed_value {
+						// No match
+						// Reset search position and try again
+						search_cursor.set_position(next_search_pos);
+						continue;
+					}
 
-						while src_cursor.position() <  channel_end_offset && 
-								search_cursor.position() < current_packed_stream_pos {
-							// decode next src
+					// when we get here, two values have matched
+					let mut match_length = 1;
+
+					if src_cursor.position() < channel_end_offset &&
+					search_cursor.position() < current_packed_stream_pos {
+
+						while src_cursor.position() < channel_end_offset &&
+							search_cursor.position() < current_packed_stream_pos {
+
+							// fetch next value from uncompressed stream
 							tmp_cursor.set_position(0);
+							let src_position_if_no_match = src_cursor.position();
 							p61_putdata(&mut src_cursor, &mut tmp_cursor)?;
 							tmp_cursor.set_position(0);
-							let src_value = p61_fetchdata(&mut tmp_cursor)?;
+							let next_src_value = p61_fetchdata(&mut tmp_cursor)?;
 
-							let search_value = p61_fetchdata(&mut search_cursor)?;
+							// fetch one value from compressed stream
+//							let search_position_if_no_match = search_cursor.position();
+							let next_compressed_value = p61_fetchdata(&mut search_cursor)?;
 
-							if src_value == search_value {
-								match_count += 1;
-							} else {
-								src_cursor.set_position(src_cursor.position()-4);
+							if next_src_value != next_compressed_value {
+								// no match, abort
+								// but first undo cursor
+
+								// The Player lets the pointer for the compressed stream
+								// move too far
+								//search_cursor.set_position(search_position_if_no_match);
+
+								// src_cursor is not used after this
+								// but lets reset it anyway
+								src_cursor.set_position(src_position_if_no_match);
 								break;
 							}
+
+							// If we get here we have a match
+							// increase counter and keep searching
+							match_length += 1;
 						}
+					}
 
-						if match_count > 1 && match_count > longest_match_count {
-							found_match = true;
-							longest_match_count = match_count;
-							longest_match_pos = search_position;
-							consumed_pos = src_cursor.position();
-						}
+					// now we need to figure out the length in bytes
+					// of the current match
+					let mut match_length_bytes = (search_cursor.position() - start_search_pos) as i64;
+					// pointer is at least 3 bytes
+					match_length_bytes -= 3;
 
+					// The Player seems to do it this way, 
+					// but it is off by 3 bytes?
+					let pointer_size = current_packed_stream_pos - start_search_pos;
+					if pointer_size >= 256 {
+						match_length_bytes -= 1;
+					}
 
-					} // if match
-	
-				} // while search
+					if match_length_bytes > best_match_length_bytes {
+						best_match = true;
+						best_match_offset = start_search_pos;
+						best_match_length = match_length;
+						best_match_length_bytes = match_length_bytes;
+						best_match_cursor = src_cursor.position();
 
-				if found_match {
+						// and now keep searching
+					}
+
+					// Reset search position and try again
+					search_cursor.set_position(next_search_pos);
+				} // while search_cursor.position() < current_packed_stream_pos 
+
+				// now we have searched
+				if best_match {
+					// and we have found
 					// Rewind stream
 					packed_stream_cursor.set_position(current_packed_stream_pos);
 					// Jump forward in stream
-					stream_cursor.set_position(consumed_pos);
+					stream_cursor.set_position(best_match_cursor);
 
 					// calc pointer
-					let mut delta =  current_packed_stream_pos - longest_match_pos + 3;
+					let mut delta =  current_packed_stream_pos + 3 - best_match_offset;
 					if delta < 256 {
 						// 8 bit pointer
 						packed_stream_cursor.write_all(&[0xff])?;
-						packed_stream_cursor.write_all(&[0b01000000 | longest_match_count-1])?;
+						packed_stream_cursor.write_all(&[0b01000000 | best_match_length])?;
 						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
 					} else {
 						// 16 bit pointer
 						delta += 1;
 						packed_stream_cursor.write_all(&[0xff])?;
-						packed_stream_cursor.write_all(&[0b11000000 | longest_match_count-1])?;
+						packed_stream_cursor.write_all(&[0b11000000 | best_match_length])?;
 						packed_stream_cursor.write_all(&[((delta >> 8) & 0xff) as u8])?;
 						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
 					}
-				} // if found_match
+				}
+
+				// Time to loop again and try to pack next command
+
 			} // stream_cursor.position() < channel_end_offset
 		} // for pattern_idx 
 	} // for channel_idx
