@@ -1255,6 +1255,9 @@ pub fn analyze_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 			} else {
 				repeat_length = length - repeat_start;
 			}
+
+			println!("   using the same sample data as {}",sample_index);
+			println!("   sample length {} finetune {} volume {} repeat start {} repeat length {}",length,finetune & 0xf,volume,repeat_start,repeat_length);
 			
 			let si = &mut module.sample_info[i];
 			si.length = length;
@@ -1278,6 +1281,7 @@ pub fn analyze_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 			// 4-bit delta can be enabled/disabled per sample, bit 7 of finetune (0x80)
 			// It is possible to combine 8-bit and 4-bit delta
 			if is_delta_4_bit && is_sample_delta_4_bit {
+				println!("   sample data is 4 bit delta packed");
 				let sample_end = sample_start + sample_length as usize; // Packed length is half of unpacked length
 				let mut delta:u8 = 0;
 				for i in sample_start..sample_end {
@@ -1295,6 +1299,7 @@ pub fn analyze_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 				sample_start = sample_end;
 				
 			} else if is_delta_8_bit {
+				println!("   sample data is 8 bit delta packed");
 				let sample_end = sample_start + (sample_length as usize) * 2;
 				let mut delta:u8 = data[sample_start];
 				// First byte get copied unmodified
@@ -1955,7 +1960,18 @@ mod tests {
 
 		Ok(())
 	}
-	
+
+	#[test]
+	fn test_analyze_p61() -> Result<(),PTMFError> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
+		let file = File::open(&p61filename)?;
+		let mut reader = BufReader::new(&file);
+		analyze_p61(&mut reader)?;
+
+		Ok(())
+	}
+
     #[test]
     fn test_write_p61_spiderfunk() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
