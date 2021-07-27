@@ -1737,8 +1737,11 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 			}
 			packed_pattern_offsets[pattern_idx][channel_idx] = packed_stream_cursor.position() as usize;
 
+//			println!("=>>> channel_idx {} pattern_idx {} stream_cursor.position() {} packed_stream_cursor.position() {}",channel_idx,pattern_idx,stream_cursor.position(),packed_stream_cursor.position());
+
 			let channel_end_offset = pattern_offsets[pattern_idx+1][channel_idx] as u64;
 			while stream_cursor.position() < channel_end_offset {
+//				println!("stream_cursor.position() {} packed_stream_cursor.position() {}",stream_cursor.position(),packed_stream_cursor.position());
 				if first {
 					first = false;
 					// First time is special and can not be compressed
@@ -1756,6 +1759,8 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 				packed_stream_cursor.set_position(current_packed_stream_pos);
 				let first_src_value = p61_fetchdata(&mut packed_stream_cursor)?;
 
+//				println!(" first_src_value {:x}",first_src_value);
+
 				let mut search_cursor = Cursor::new(packed_stream_cursor.get_ref());
 				search_cursor.set_position(0);
 
@@ -1765,6 +1770,7 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 				let mut best_match_length_bytes = 0;
 				let mut best_match_cursor = 0;
 				while search_cursor.position() < current_packed_stream_pos {
+
 					// save start of search position
 					// this is used to calculate the number of
 					// compressed bytes
@@ -1870,7 +1876,10 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 						match_length_bytes -= 1;
 					}
 
+//					println!(" potential match at start_search_pos {} match_length_bytes {} match_length {} first_src_value {:x} second_src_value {:x}", start_search_pos, match_length_bytes, match_length, first_src_value, second_src_value);
+
 					if match_length_bytes > best_match_length_bytes {
+//						println!(" new best match");
 						best_match = true;
 						best_match_offset = start_search_pos;
 						best_match_length = match_length;
@@ -1895,11 +1904,13 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 					// calc pointer
 					let mut delta =  current_packed_stream_pos + 3 - best_match_offset;
 					if delta < 256 {
+//						println!(" write best match 8 bit {:02x} {:02x} {:02x}",0xff,0b01000000 | best_match_length,(delta & 0xff));
 						// 8 bit pointer
 						packed_stream_cursor.write_all(&[0xff])?;
 						packed_stream_cursor.write_all(&[0b01000000 | best_match_length])?;
 						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
 					} else {
+//						println!(" write best match 16 bit {:02x} {:02x} {:02x} {:02x}",0xff,0b11000000 | best_match_length,((delta >> 8) & 0xff),(delta & 0xff));
 						// 16 bit pointer
 						delta += 1;
 						packed_stream_cursor.write_all(&[0xff])?;
@@ -1907,7 +1918,10 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 						packed_stream_cursor.write_all(&[((delta >> 8) & 0xff) as u8])?;
 						packed_stream_cursor.write_all(&[(delta & 0xff) as u8])?;
 					}
+				} else {
+//					println!(" no match ");
 				}
+
 
 				// Time to loop again and try to pack next command
 
@@ -2078,7 +2092,7 @@ mod tests {
 	#[test]
 	fn test_analyze_p61() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
-		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.5 finger punch2.mod");
 		let file = File::open(&p61filename)?;
 		let mut reader = BufReader::new(&file);
 		analyze_p61(&mut reader)?;
@@ -2098,7 +2112,7 @@ mod tests {
 
 		write_p61(&mut writer,&mut module)?;
 
-		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
+		let p61filename = format!("{}/testdata/{}",basedir, "spiderfunk.mod");
 		let file = File::open(&p61filename)?;
 		let mut reader = BufReader::new(&file);
 		let mut data:Vec<u8> = Vec::new();
