@@ -1454,7 +1454,7 @@ fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 	if cmd == 0xE {
 		// E commands are special, handled below
 		match param1 {
-			0 => effect = (effect & 0xff) | ((param2 & 1) * 2),
+			0 => effect = (effect & 0xf00) | ((param2 & 1) * 2),
 			1 | 2 | 9 | 0xA | 0xB | 0xD | 0xE if param2 == 0 => effect = 0, // No effect if empty paramters,
 			3 | 4 | 5 | 6 | 7 | 8 | 0xF => (),
 			0xC if param2 == 0 => effect = 0xC00, // Replace with empty volume
