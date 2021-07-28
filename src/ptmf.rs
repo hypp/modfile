@@ -2092,7 +2092,7 @@ mod tests {
 	#[test]
 	fn test_analyze_p61() -> Result<(),PTMFError> {
 		let basedir = env!("CARGO_MANIFEST_DIR");
-		let p61filename = format!("{}/testdata/{}",basedir, "P61.5 finger punch2.mod");
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
 		let file = File::open(&p61filename)?;
 		let mut reader = BufReader::new(&file);
 		analyze_p61(&mut reader)?;
@@ -2111,8 +2111,7 @@ mod tests {
 		let mut writer = Cursor::new(&mut created);
 
 		write_p61(&mut writer,&mut module)?;
-
-		let p61filename = format!("{}/testdata/{}",basedir, "spiderfunk.mod");
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
 		let file = File::open(&p61filename)?;
 		let mut reader = BufReader::new(&file);
 		let mut data:Vec<u8> = Vec::new();
