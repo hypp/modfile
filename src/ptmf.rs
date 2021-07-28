@@ -474,6 +474,20 @@ impl PTModule {
 			} // for rows
 		} // for patterns
 	}
+
+	pub fn remove_breaks_on_last_rows(&mut self) {
+		for pattern in &mut self.patterns {
+			let i = pattern.rows.len()-1;
+			for channel in &mut pattern.rows[i].channels {
+				let effect = (channel.effect & 0xf00) >> 8;
+				if effect == 0xd {
+					// remove it
+					channel.effect = 0;
+				}
+			} // for channels
+		} // for patterns
+	}
+
 }
 
 fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
@@ -1647,6 +1661,8 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	// the parts that gets removed
 	workmodule.truncate_patterns();
 	workmodule.remove_duplicate_breaks();
+	// D commands on last rows of patterns should be removed
+	workmodule.remove_breaks_on_last_rows();
 
 	// The Player uses 2 passes
 	// First pass: 
