@@ -25,17 +25,18 @@ const MAGIC_4CHN:[u8; 4] =['4' as u8, 'C' as u8, 'H' as u8, 'N' as u8];
 const MAGIC_6CHN:[u8; 4] =['6' as u8, 'C' as u8, 'H' as u8, 'N' as u8];
 const MAGIC_8CHN:[u8; 4] =['8' as u8, 'C' as u8, 'H' as u8, 'N' as u8];
 
-///
-/// Periods from http://greg-kennedy.com/tracker/modformat.html
-///
-///          C    C#   D    D#   E    F    F#   G    G#   A    A#   B
-/// Octave 1: 856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453
-/// Octave 2: 428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226
-/// Octave 3: 214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113
-///
-/// Octave 0:1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907
-/// Octave 4: 107, 101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57
-///
+//
+// Periods from http://greg-kennedy.com/tracker/modformat.html
+//
+//          C    C#   D    D#   E    F    F#   G    G#   A    A#   B
+// Octave 1: 856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453
+// Octave 2: 428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226
+// Octave 3: 214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113
+//
+// Octave 0:1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907
+// Octave 4: 107, 101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57
+//
+/// Lookup table of amiga periods
 pub static PERIODS: &'static [u16] = &[
     1712,1616,1525,1440,1357,1281,1209,1141,1077,1017, 961, 907,
     856,  808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
@@ -44,11 +45,14 @@ pub static PERIODS: &'static [u16] = &[
 	107,  101,  95,  90,  85,  80,  76,  71,  67,  64,  60,  57,
 ];
 
+/// Lookup table of note names
 pub static NOTE_NAMES: &'static [&'static str] = &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+/// Lookup table for 4 bit delta packing
 static DELTA_4BIT: &'static [u8] = &[0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 
 									 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, 0xff];
 
+/// Lookup table for effect names
 pub static EFFECT_NAMES: &'static [&'static str] = &[
 		// Normal commads 0-F
 		"Arpeggio", "Slide up", "Slide down", "Slide to note",
@@ -490,6 +494,7 @@ impl PTModule {
 
 }
 
+/// read data until the array is full
 fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
 	let mut pos = 0;
 	while pos < data.len() {
@@ -504,12 +509,14 @@ fn read_all(reader: &mut dyn Read, data: &mut [u8]) -> io::Result<usize> {
 	Ok(pos)
 }
 
+/// write all data in the array
 fn write_all(writer: &mut dyn Write, data: &[u8]) -> io::Result<()> {
 	let n = {writer.write_all(&data)}?;
 	
 	Ok(n)
 }
 
+/// read a 0 padded string stored as a sequence of u8
 fn read_0_padded_string(reader: &mut dyn Read, len: usize) -> Result<String, io::Error> {
 	let mut data = vec![0u8; len];
 	read_all(reader,&mut data)?;
@@ -521,6 +528,7 @@ fn read_0_padded_string(reader: &mut dyn Read, len: usize) -> Result<String, io:
 	Ok(str)
 }
 
+/// write a string as zero padded sequence of u8
 fn write_0_padded_string(writer: &mut dyn Write, str: &String, len: usize) -> io::Result<()> {
 	let mut data = vec![0u8; len];
 	let str_buf = str.as_bytes();
@@ -534,6 +542,7 @@ fn write_0_padded_string(writer: &mut dyn Write, str: &String, len: usize) -> io
 	Ok(n)
 }
 
+/// read a big endian u16
 fn read_big_endian_u16(reader: &mut dyn Read) -> Result<u16, io::Error> {
 	let mut data_arr = [0u8; 2];
 	read_all(reader,&mut data_arr)?;
@@ -547,6 +556,7 @@ fn read_big_endian_u16(reader: &mut dyn Read) -> Result<u16, io::Error> {
 	Ok(data)
 }
 
+/// write a big endian u16
 fn write_big_endian_u16(writer: &mut dyn Write, val: u16)  -> io::Result<()> {
 	let mut data = [0u8; 2];
 	data[0] = (val >> 8) as u8;
@@ -557,6 +567,7 @@ fn write_big_endian_u16(writer: &mut dyn Write, val: u16)  -> io::Result<()> {
 	Ok(n)
 }
 
+/// read a single u8
 fn read_u8(reader: &mut dyn Read) -> Result<u8, io::Error> {
 	let mut data = [0u8; 1];
 	
@@ -565,7 +576,7 @@ fn read_u8(reader: &mut dyn Read) -> Result<u8, io::Error> {
 	Ok(data[0])
 }
 
-
+/// write a single u8
 fn write_u8(writer: &mut dyn Write, val: u8)  -> io::Result<()> {
 	let mut data = [0u8; 1];
 	data[0] = val;
@@ -1193,7 +1204,7 @@ pub fn read_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	Ok(module)
 }
 
-/// Read an Amiga ProTracker file packed with The Player 6.1
+/// Read an Amiga ProTracker file packed with The Player 6.1 and write some info about it
 pub fn analyze_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	let mut module = PTModule::new();
 	module.num_channels = DEFAULT_NUMBER_OF_CHANNELS_PER_ROW;
@@ -1453,6 +1464,7 @@ pub fn analyze_p61(reader: &mut dyn Read) -> Result<PTModule, PTMFError> {
 	Ok(module)
 }
 
+/// encode one channel onw row in The Player format
 fn encode_p61_channel(channel: &Channel) -> Vec<u8> {
 	let mut data:Vec<u8> = Vec::new();
 
