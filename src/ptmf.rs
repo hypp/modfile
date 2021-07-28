@@ -1751,13 +1751,16 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 
 				// save current positions
 				let current_packed_stream_pos = packed_stream_cursor.position();
+				let current_stream_pos = stream_cursor.position();
 
-				// Write current value to stream
-				p61_putdata(&mut stream_cursor, &mut packed_stream_cursor)?;
+				let mut tmp_area = Vec::new();
+				let mut tmp_cursor = Cursor::new(&mut tmp_area);
 
-				// get it back for comparison
-				packed_stream_cursor.set_position(current_packed_stream_pos);
-				let first_src_value = p61_fetchdata(&mut packed_stream_cursor)?;
+				// fetch next value from uncompressed stream
+				tmp_cursor.set_position(0);
+				p61_putdata(&mut stream_cursor, &mut tmp_cursor)?;
+				tmp_cursor.set_position(0);
+				let first_src_value = p61_fetchdata(&mut tmp_cursor)?;
 
 //				println!(" first_src_value {:x}",first_src_value);
 
@@ -1803,9 +1806,6 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 						// no point in continuing searching
 						break;
 					}
-
-					let mut tmp_area = Vec::new();
-					let mut tmp_cursor = Cursor::new(&mut tmp_area);
 
 					// fetch next value from uncompressed stream
 					tmp_cursor.set_position(0);
@@ -1920,8 +1920,12 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 					}
 				} else {
 //					println!(" no match ");
-				}
+					// did not find any mathcing data
 
+					// rewind source stream and write to packed stream
+					stream_cursor.set_position(current_stream_pos);
+					p61_putdata(&mut stream_cursor, &mut packed_stream_cursor)?;
+				}
 
 				// Time to loop again and try to pack next command
 
