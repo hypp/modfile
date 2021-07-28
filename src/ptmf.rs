@@ -1628,11 +1628,8 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	let mut workmodule = module.clone();
 
 	// Prepare all data first
-	workmodule.truncate_samples();
-	// To generate binary identical files,
-	// we have to leave duplicate samples
-	//workmodule.remove_duplicate_samples();
-	workmodule.remove_unused_samples();
+
+	// First remove patterns
 	workmodule.truncate_patterns();
 	workmodule.remove_duplicate_breaks();
 	// to generate binary identical files
@@ -1640,6 +1637,12 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	//workmodule.remove_duplicate_patterns();
 	workmodule.remove_unused_patterns();
 
+	// Then remove samples
+	workmodule.truncate_samples();
+	// To generate binary identical files,
+	// we have to leave duplicate samples
+	//workmodule.remove_duplicate_samples();
+	workmodule.remove_unused_samples();
 
 	// The Player uses 2 passes
 	// First pass: 
