@@ -9,6 +9,11 @@ repository = "https://github.com/hypp/modfile"
 
 edition = "2018"
 
+include = [
+    "**/*.rs",
+    "Cargo.toml",
+]
+
 [dependencies]
 
 serde = { version = "1.0", features = ["derive"] }
