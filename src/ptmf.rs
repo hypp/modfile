@@ -1659,10 +1659,10 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	// Can only do this after removing samples
 	// since some samples might be used in
 	// the parts that gets removed
+	// D commands on last row of patterns should be removed
+	workmodule.remove_breaks_on_last_rows();
 	workmodule.truncate_patterns();
 	workmodule.remove_duplicate_breaks();
-	// D commands on last rows of patterns should be removed
-	workmodule.remove_breaks_on_last_rows();
 
 	// The Player uses 2 passes
 	// First pass: 
