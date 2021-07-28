@@ -1964,19 +1964,26 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	// repeat start u16 or 0xffff u16
 	let mut samples_to_write = Vec::new();
 	for i in 0..workmodule.sample_info.len() {
-		let si = &workmodule.sample_info[i];
 		let mut same_as_another = false;
 		let mut same_index = 0;
-		for j in 0..i {
-			// Check if same sample data as another sample
-			let si_other = &workmodule.sample_info[j];
-			if si.data == si_other.data {
-				same_as_another = true;
-				same_index = j;
-				break;
-			}
-		}
+		{
+			let si = &workmodule.sample_info[i];
 
+			if si.data.len() > 0 {
+				// only compare if sample isn't empty
+				for j in 0..i {
+					// Check if same sample data as another sample
+					let si_other = &workmodule.sample_info[j];
+					if si.data == si_other.data {
+						same_as_another = true;
+						same_index = j;
+						break;
+					}
+				}	
+			}
+		} // end the borrow of si
+
+		let si = &mut workmodule.sample_info[i];
 		if same_as_another {
 			// Sample that points to another samples data
 			let sample_index = !(same_index as u16 + 1) + 1;
@@ -1990,10 +1997,16 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 			};
 			write_big_endian_u16(&mut final_data_cursor, repeat_start)?;
 		} else {
+			// Normal sample
 			// add this to the list of samples to write
 			samples_to_write.push(i);
 
-			// Normal sample
+			if si.data.len() == 0 {
+				// Empty samples not allowed, must be at least one word
+				si.data.push(0);
+				si.data.push(0);
+			}
+
 			// length in words
 			let sample_length = si.data.len() as u16 / 2;
 			write_big_endian_u16(&mut final_data_cursor, sample_length)?;
