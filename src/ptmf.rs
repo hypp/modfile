@@ -677,33 +677,33 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 	let mut module = PTModule::new();
 
 	// First read 20 bytes songname
-	module.name = read_0_padded_string(reader, 20)?;
+	module.name = read_0_padded_string(reader, 20).expect("Failed to read module name");
 
 	// Read all sample info
 	// TODO Handle 15 sample files
 	for _i in 0..DEFAULT_NUMBER_OF_SAMPLES {
 		let mut si = SampleInfo::new();
 		// Sample name
-		si.name = read_0_padded_string(reader, 22)?;
-		si.length = read_big_endian_u16(reader)?;
+		si.name = read_0_padded_string(reader, 22).expect("Failed to read sample name");
+		si.length = read_big_endian_u16(reader).expect("Failed to read sample length");
 		// Finetune
-		si.finetune = read_u8(reader)?;
+		si.finetune = read_u8(reader).expect("Failed to read finetune");
 		// Volume
-		si.volume = read_u8(reader)?;
+		si.volume = read_u8(reader).expect("Failed to read volume");
 		// Repeat start
-		si.repeat_start = read_big_endian_u16(reader)?;
+		si.repeat_start = read_big_endian_u16(reader).expect("Failed to read repeat start");
 		// Repeat length
-		si.repeat_length = read_big_endian_u16(reader)?;
+		si.repeat_length = read_big_endian_u16(reader).expect("Failed to read repeat length");
 
 		module.sample_info.push(si);
 	}
 	
 	// Songlength
-	module.length = read_u8(reader)?;
+	module.length = read_u8(reader).expect("Failed to read module length");
 	// nt_restart
-	module.nt_restart = read_u8(reader)?;
+	module.nt_restart = read_u8(reader).expect("Failed to read nt restart");
 	// Song positions
-	read_all(reader,&mut module.positions.data)?;
+	read_all(reader,&mut module.positions.data).expect("Failed to read positions");
 	// M.K.
 	read_all(reader,&mut module.mk)?;
 	if module.mk != MAGIC_MK &&
@@ -735,7 +735,7 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 		for row in &mut pattern.rows {
 			for channel in &mut row.channels {
 				let mut data  = [0u8;4];
-				read_all(reader,&mut data)?;
+				read_all(reader,&mut data).expect("Failed to read pattern data");
 				channel.sample_number = (data[0] & 0xf0) | ((data[2] & 0xf0) >> 4);
 				channel.period = (((data[0] & 0x0f) as u16) << 8) | (data[1] as u16);
 				channel.effect = (((data[2] & 0x0f) as u16) << 8) | (data[3] as u16);
@@ -749,7 +749,12 @@ pub fn read_mod(reader: &mut dyn Read, ignore_file_size_check: bool) -> Result<P
 		if si.length > 0 {
 			let length_in_bytes = si.length * 2;
 			let mut data = vec![0u8; length_in_bytes as usize];
-			read_all(reader,&mut data)?;
+			match read_all(reader,&mut data) {
+				Err(e) => {
+					println!("Warning: Not enough sample data, file is likely corrupt. Error: '{}'",e);
+				},
+				_ => ()
+			};
 			si.data = data;
 		}
 	}
