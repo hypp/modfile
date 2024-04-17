@@ -1651,7 +1651,7 @@ fn p61_fetchdata(packed_stream: &mut dyn Read) -> Result<u32,Error> {
 
 
 /// Write a 31 sample Amiga ProTracker mod-file as if packed with The Player
-pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFError> {
+pub fn write_p61(writer: &mut dyn Write, sample_writer: Option<&mut dyn Write>, module: &PTModule) -> Result<(),PTMFError> {
 	if module.num_channels != 4 {
 		return Err(PTMFError::Parse(format!("Error! Only supported for 4 channels. This module has '{}' channels", module.num_channels)));
 	}
@@ -2101,6 +2101,10 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 	final_data_cursor.set_position(sample_offset);
 
 	// TODO optional separate file for samples
+	let mut writedest: &mut dyn Write = &mut final_data_cursor;
+	if let Some(tmp) = sample_writer {
+		writedest = tmp
+	}
 
 	// for each sample 
 	// sample data
@@ -2108,7 +2112,7 @@ pub fn write_p61(writer: &mut dyn Write, module: &PTModule) -> Result<(),PTMFErr
 		let si = &workmodule.sample_info[idx];
 		// TODO check that sample length is even
 		let mut sample_cursor = Cursor::new(&si.data);
-		copy(&mut sample_cursor, &mut final_data_cursor)?;
+		copy(&mut sample_cursor, writedest)?;
 	}
 
 	final_data_cursor.set_position(0);
@@ -2167,7 +2171,7 @@ mod tests {
 		let mut created:Vec<u8> = Vec::new();
 		let mut writer = Cursor::new(&mut created);
 
-		write_p61(&mut writer,&mut module)?;
+		write_p61(&mut writer,Option::None, &mut module)?;
 		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
 		let file = File::open(&p61filename)?;
 		let mut reader = BufReader::new(&file);
@@ -2176,6 +2180,33 @@ mod tests {
 
 		assert!(created.len() == data.len());
 		assert!(created == data);
+
+		Ok(())
+    }
+
+	#[test]
+    fn test_write_p61_spiderfunk_separate() -> Result<(),PTMFError> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "spiderfunk.mod");
+		let mut module = load_module(infilename)?;
+
+		let mut created:Vec<u8> = Vec::new();
+		let mut writer = Cursor::new(&mut created);
+
+		let mut samples:Vec<u8> = Vec::new();
+		let mut sample_writer = Cursor::new(&mut samples);
+
+		write_p61(&mut writer,Option::Some(&mut sample_writer), &mut module)?;
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.spiderfunk.mod");
+		let file = File::open(&p61filename)?;
+		let mut reader = BufReader::new(&file);
+		let mut data:Vec<u8> = Vec::new();
+		reader.read_to_end(&mut data)?;
+
+		assert!(created.len()+samples.len() == data.len());
+		assert!(created == data[..created.len()]);
+		assert!(samples == data[created.len()..]);
 
 		Ok(())
     }
@@ -2190,7 +2221,7 @@ mod tests {
 		let mut created:Vec<u8> = Vec::new();
 		let mut writer = Cursor::new(&mut created);
 
-		write_p61(&mut writer,&mut module)?;
+		write_p61(&mut writer,Option::None,&mut module)?;
 
 		let p61filename = format!("{}/testdata/{}",basedir, "P61.leftovers.mod");
 		let file = File::open(&p61filename)?;
@@ -2200,6 +2231,34 @@ mod tests {
 
 		assert!(created.len() == data.len());
 		assert!(created == data);
+
+		Ok(())
+    }
+
+	#[test]
+    fn test_write_p61_leftovers_separate() -> Result<(),PTMFError> {
+		let basedir = env!("CARGO_MANIFEST_DIR");
+
+		let infilename = format!("{}/testdata/{}",basedir, "leftovers.mod");
+		let mut module = load_module(infilename)?;
+
+		let mut created:Vec<u8> = Vec::new();
+		let mut writer = Cursor::new(&mut created);
+
+		let mut samples:Vec<u8> = Vec::new();
+		let mut sample_writer = Cursor::new(&mut samples);
+
+		write_p61(&mut writer,Option::Some(&mut sample_writer), &mut module)?;
+
+		let p61filename = format!("{}/testdata/{}",basedir, "P61.leftovers.mod");
+		let file = File::open(&p61filename)?;
+		let mut reader = BufReader::new(&file);
+		let mut data:Vec<u8> = Vec::new();
+		reader.read_to_end(&mut data)?;
+
+		assert!(created.len()+samples.len() == data.len());
+		assert!(created == data[..created.len()]);
+		assert!(samples == data[created.len()..]);
 
 		Ok(())
     }
