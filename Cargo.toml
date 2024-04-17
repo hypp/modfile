@@ -1,6 +1,6 @@
 [package]
 name = "modfile"
-version = "1.4.6"
+version = "1.5.0"
 authors = ["Mathias Olsson <hypp74@gmail.com>"]
 description = "This is a Rust crate for reading and writing Amiga ProTracker MOD-files. It can also read (some?) MOD-files packed with The Player 6.1, including 8-bit and 4-bit delta packed samples, and also create The Player 6.1 compatible files."
 readme = "README.md"
